@@ -1,0 +1,128 @@
+Commands for CLI:
+- where n represents numerical input
+- where a name in a 'string' represents a string input
+- where ? or [ ] designate optional parts
+- where * designates a variable number of arguments
+
+(prompt to confirm changes for removals, insertions, amendments
+ of nodes and exiting program before continuing)
+
+enter n n*
+- enter the given node
+- continue for additional nodes
+
+return [n]
+- return to the parent node
+- if number given, return 'n' times
+
+remove [n]
+- if number given, remove given child node
+- if no number given, remove current node and return to parent
+
+new data at n [in n] 'data'
+- create a new node as a child node of the given node
+- if 'in n' given, create a new node at the given position in the current list
+
+new tag [in n] 'name' 'value'
+- if no number given, add a new tag to the current node
+- if number given, add a tag to the given node
+
+edit data [of n] 'new_data'
+- if no number given, edit the name/data of the current node
+- if number given, edit name/data of the numbered node in the list
+
+edit tag name [of n] 'tag' 'new_name'
+- edit the name of the given tag (in quotes, to allow spaces)
+
+edit tag value [of n] 'tag' 'new_value'
+- edit the value of the given tag
+
+exit
+- end the program, prompt to save to file
+
+in n
+- queue the next command to execute inside the given node, then after
+  execution, return to the parent
+
+command; command[; command]*
+- run multiple commands
+
+
+
+Defining custom commands:
+- in plugin.py, define a class which subclasses api.CustomCommand
+- add the attribute Command.ID which must be a single keyword that defines
+  which keyword will call the command
+- [optional] add the attribute Command.signature which defines how to parse
+  inputs to the command
+- [optional, ignore for most commands] add the attribute Command.given_inputs
+  which must be a dict whose keys are strings of the names of the inputs to
+  the command (should match input names in signature)
+- add method Command.execute(self, *args, **kw) where required arguments have
+  the names of required inputs and optional arguments have the names of
+  optional/variable arguments (should match input names in signature)
+- [optional ]for each input name, add a method called Command.input_handler_x
+  where 'x' should be replaced with the name of an input name (from signature)
+
+Writing command signatures:
+- signatures define how custom commands and their inputs are parsed
+- use the default commands in the api as examples
+- a blank signature means only the keyword (Command.ID) bound to the command
+  is needed (or if no signature defined)
+
+STRING=arg
+- accept a string input
+- the input is called 'arg'
+
+NUMBER=arg
+- accept a numerical input
+- the input is called 'arg'
+
+lowercase_word
+- accept a keyword
+
+STRING*=arg
+NUMBER*=arg
+keyword*
+- accept a variable number of inputs here (maybe none)
+- (inputs added to list and passed under name 'arg')
+- asterisk (*) must come after keyword/input and before the equals sign
+
+STRING?=arg
+NUMBER?=arg
+keyword?
+- accept an input/keyword if present
+- question mark must come after keyword/input and before equals sign
+
+[phrase]
+- accept the phrase (a list of elements) inside if present
+- (the first element of the phrase is checked only: if it present, the rest is
+   assumed to follow)
+- phrase can be any length
+- nested [optional phrases] are allowed
+
+
+
+Plugin hooks:
+(values produced by hooks may not need to be enforced as strings
+ so that plugins can convert data to correct format e.g. dates/numbers)
+- see plugin.py for more detailed descriptions of each hook and
+  examples of some in use with the sample data
+
+pre_node_creation_hook(data, depth, parents) -> value for node
+- edit data before creating node
+post_node_creation_hook(node) -> None
+- edit node after creation e.g. add tags
+
+
+tag_name_hook(node, old, new) -> name of tag
+- edit tag name before being assigned
+tag_name_input_test(node, old, new) -> bool
+- custom logic to check new tag names e.g. make sure from certain list
+  of names
+
+
+tag_value_hook(node, tag, old, new) -> value of tag
+- edit tag value before being assigned
+tag_value_input_test(node, tag, old, new) -> bool
+- custom logic to check new tag values e.g. make sure not empty

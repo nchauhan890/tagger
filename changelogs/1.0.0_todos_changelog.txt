@@ -1,0 +1,207 @@
+CHANGELOG:
+[FORMAT: - dd/mm//yy: change + info]
+some entries marked with asterisk may have changed
+
+- 21/12/19: started DSL for database traversal
+- 28/12/19: added new command to add new tags
+              - changed 'insert [in n] at n' to 'new data [in n] at n'
+                and 'new tag [in n]'
+- 28/12/19: added 'literal_input' to command line
+          **  - when typing commands, the input that may be asked for by the
+                command (e.g. the edit tag command) can be written alongside
+                the command itself in percentage signs:
+                >>> new tag; %date%; %1997%
+          **  - the parser will parse them like commands so must be semicolon-
+                separated, but they will be added to the input queue
+                [CHANGED ON 01/01/20]
+                [DEPRECATED ON 22/01/20]
+- 28/12/19: changed 'edit tag name of 'name'' to 'edit tag name 'name''
+- 28/12/19: added '[of n]' suffix to both tag editing commands
+- 29/12/19: implemented base API functions (e.g. api.Tree.remove_node)
+- 31/12/19: implemented the rest of the plugin hooks and input handlers in
+            plugin.py
+              - pre_node_creation_hook(data, depth, parents)
+              - post_node_creation_hook(node)
+              - tag_name_hook(node, old, new)
+              - tag_name_input_handler(input)
+              - tag_value_hook(node, tag, old, new)
+              - tag_value_input_handler(input)
+- 01/01/20: implemented framework in lexer/parser/structure for custom commands
+- 01/01/20: each literal input is now NOT separated by semicolon
+          **  - %input% may appear after main command any number of times, if
+                any
+              - semicolon only appears if new command follows
+              [DEPRECATED ON 22/01/20]
+- 01/01/20: added display_hook and prompt_string plugin hooks
+- 09/01/20: changed default display so that it numbers the entries instead of
+            bullet points them, to easily find the node number to write in
+            commands
+- 11/01/20: added detail of either token value or position in text where error
+            occured in error message (depending on whether the parser or lexer
+            raised it)
+- 13/01/20: added wrapper around api.prompt (renamed from api.run) to call it
+            and handle errors (NodeError, ProgramExit, SyntaxError)
+              - any other errors are now 'unexpected' and will be raised
+                (SyntaxError raised)
+            anyway
+- 13/01/20: started implementing default commands
+              - moved Command class from structure.py to API
+              - Command subclasses will have an Command.execute method which
+                performs command
+              - completed 'enter n' and 'exit' commands
+- 14/01/20: split tag name/value editing into 2 separate commands
+              - each command now will take the tag name as an input, not
+                a part of the syntax
+- 14/01/20: changed the parser so numbers, strings or literal inputs are 
+        **  all accepted under literal input
+            [DEPRECATED ON 22/01/20]
+- 14/01/20: return command now changed to 'return n' [n is optional input]
+              - execute the return command n times, in effect
+- 16/01/20: changed enter command to 'enter [n]*' to enter sub nodes more
+            easily
+              - e.g. 'enter 3 2' will enter the 2nd node of the 3rd node
+                of the current
+- 16/01/20: implemented 'remove [n]' command
+- 16/01/20: default display hook now prints x.y.z which corresponds to the
+            indexes of the children in the current traversal
+- 16/01/20: Commmand subclasses now accept 'args', 'optional_args', 'inputs'
+            'optional inputs'
+- 17/01/20: inputs are now checked before the command is run
+              - the method 'input_handler_x' will be called for input of name
+                x
+          **  - the method 'extra_input_handler' will be called for extra
+                inputs (if command.variable_inputs=True)
+              - the methods return a value for the input and raise either
+                NodeError or InputError if the value is invalid
+                [DEPRECATED ON 22/01/20]
+- 17/01/20: added CLIParser.eat_keyword(kw) to eat TEXT tokens, but also
+            checking that token.value == kw
+- 17/01/20: parser now will resolve the name of a keyword to a custom command
+            from the plugin, if defined
+            - custom command must subclass api.CustomCommand
+            - must have .id attribute (single word string) so that the parser
+              knows which keyword it is for
+- 17/01/20: all commands must now have a .signature attribute to tell the
+            parser how to parse it
+              - signature = 'STRING of NUMBER' would be a signature to a
+                command that accept a string and number input with a keyword
+                between them
+              - STRING or NUMBER where input is required
+              - STRING? where optional input (same for number)
+              - STRING* where variable input (same for number)
+          **  - X ? Y where everything after Y is optional, but if one token
+                is present, the whole part must be present (must be at the end)
+                [CHANGED ON 21/01/20]
+- 21/01/20: implemented SignatureLexer/SignatureParser to parse command
+            signatures:
+              - '[x y x]' means the parts inside the brackets are optional, but
+                if x is present, y and z are expected to follow
+              - x? means the SINGLE part is optional
+              - x* means the SINGLE part can appear multiple times
+              - STRING, NUMBER designate where inputs are (and obviously their
+                type)
+              - any lowercase words are keywords
+- 22/01/20: 'literal_input' for commands with %input% is now deprecated: use#
+            either strings or numbers instead for inputs to arguments
+- 22/01/20: command signatures must now assign names to inputs using '=name'
+            syntax:
+            - e.g. 'search for STRING=data in NUMBER=node'
+            - goes after ? or * marks ('NUMBER*=num STRING?=data')
+            - where the input handler 'extra_input_handler' was used for
+              commands with variable args, this name is now deprecated
+            - inputs that are variable (marked with *) will always be passed
+              as a list, even if it contains a single input
+              (therefore, input checkers will return a list of values too)
+- 22/01/20: added optional Command.given_inputs attribute to assign
+            pre-defined inputs to commands
+              - this can be defined either in the class body or assigned to a
+                single instance of an api.Command subclass
+              - must be given as a dict whose keys are strings of the parameter
+                names
+              - if given, these arguments will be used as inputs (even if it
+                is an empty dict)
+              - e.g. the InCommand uses this to run the EnterCommand in its
+                execute method
+- 22/01/20: post_commands list added as a secondary command queue whose
+            commands are only run after ALL of the commands in the main queue
+            have finished
+            - InCommand uses this to enter a node, then queues a ReturnCommand
+              after the next command(s) has finished
+- 22/01/20: commands must now define an execute method that accepts arguments:
+            - required arguments can be given by name, but any optional ones
+              must have a default value as they may not be present in the
+              input dict
+- 22/01/20: new arg checking is all put into api.execute_command(command):
+            - if Command.given_inputs is present, use this instead of
+              Command.inputs
+            - for each input in the whichever dict is used, the method
+              'input_handler_x' will be called on the command object for an
+              input named 'x'
+            - (input handler methods can raise either NodeError or InputError
+               to signal that the input is invalid, otherwise return a value
+               to use)
+            - finally, the command is run
+- 23/01/20: implemented InCommand to temporarily enter the given node to
+            perform the next command(s), then return back to the parent:
+            - currently does not protect against using the return command so
+              it may return twice
+            - the next commands to execute MUST be written in the same CLI
+              prompt (separated by semicolons) so they all get executed in the
+              same loop
+
+
+
+IN PROGRESS:
+implementing default commands
+
+NEXT UP:
+
+make all IN/ENTER/REMOVE/RETURN tokens -> TEXT tokens for easier parsing
+(perhaps rename TEXT to KEYWORD)
+
+
+TODO:
+
+[For API and plugins]
+- refer to plugins for custom input handlers!!
+- add call to plugin hooks in api.Tree methods
+
+- consider adding a 'master' command execution hook so that a plugin can 
+  intercept command calls and delegate calls to their custom hooks instead
+  of hard-coded hook names (for default commands)
+  - commands will need to have IDs
+  - this could allow plugins to interact
+
+- add 'do you want to save?' option before exiting
+
+
+[Commands-related things]
+- add float/drop/copy commands
+- add save/flush command
+- add dynamic listings to only show some options ***
+  (e.g. don't show 'exit' for anything other than top-level... possibly)
+- add option to list tags
+- add search option
+
+- make the 'in' command safe for use with any command that may call
+  api.Tree.return_from_node
+- add search finally
+- consider having an undo option
+
+- add a way to register new commands to the 'master' which delegates calls
+  (support here for multiple plugins at once)
+- make a general command queue object to hold both command queue lists as one
+  and know where new commands should be added
+
+
+[Input-related things]
+- change sample_data.txt as input to sys.argv[1] or something else
+
+[API]
+
+
+OTHER:
+
+- make sure that the api keeps track of current_node/traversal_depth
+  automatically, not for the plugin to handle!
+- refer to plugins for custom input handlers!
