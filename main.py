@@ -1,4 +1,4 @@
-"""Command Line Interface to traverse data tree."""
+"""Setup and run API traversal command line interface."""
 
 import api
 
@@ -11,7 +11,5 @@ with open('sample_data.txt', 'r') as f:
         content.append(line)
         line = f.readline()
 
-
 api.make_tree(''.join(content))
 api.run()
-

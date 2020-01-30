@@ -1,7 +1,6 @@
 """Plugin for API execution hooks and custom commands."""
 
 import api
-import structure
 
 
 def pre_node_creation_hook(data, depth, parents):
@@ -142,15 +141,19 @@ def prompt_string(current=None):
     return '>>> '
 
 
-class ShowCommand(api.CustomCommand):
+class ShowChildrenCommand(api.Command):
 
-    ID = 'show'
+    ID = 'children'
+
+    def signature(self):
+        return '' if api.tree.current_node.children else False
 
     def execute(self):
-        print(display_hook(api.tree.current_node))
+        for i, node in enumerate(api.tree.current_node.children, 1):
+            print('{:>3} {}'.format(i, node.data))
 
 
-class ExampleCommand(api.CustomCommand):
+class ExampleCommand(api.Command):
 
     ID = 'example'
     signature = ('STRING=data [of NUMBER=node] [in NUMBER=pos] '

@@ -6,13 +6,8 @@ import lexers
 import structure
 import api
 
-from lexers import (
-    STAR, TEXT, TAG, EQUAL, NUMBER, STRING, ENTER, EXIT, IN, RETURN, REMOVE,
-    NEW, EDIT, SEMICOLON, EOF, AT, OF, DATA, VALUE, NAME, LBRACKET, ARGUMENT,
-    RBRACKET, OPTIONAL, VARIABLE, used_tokens, reserved_keywords
-)
-# token types that are keywords
-keyword_tokens = [*used_tokens.values(), TEXT]
+from lexers import (STAR, TEXT, TAG, EQUAL, NUMBER, STRING, SEMICOLON, EOF,
+                    LBRACKET, ARGUMENT, RBRACKET, OPTIONAL, VARIABLE, KEYWORD)
 
 
 class ParserBase:
@@ -101,72 +96,59 @@ class CLIParser(ParserBase):
         return commands
 
     def eat_keyword(self, keyword):
-        if keyword in reserved_keywords:
-            self.eat(used_tokens[keyword])
-            return
-        if (self.current_token.type != TEXT
+        if (self.current_token.type != KEYWORD
             or self.current_token.value != keyword):
-            self.raise_error('expected token TEXT ({})'.format(keyword))
-        self.eat(TEXT)
+            self.raise_error('expected token KEYWORD ({})'.format(keyword))
+        self.eat(KEYWORD)
 
-    def current_token_is_keyword(self, kw):
-        return (self.current_token.type == TEXT
-                and self.current_token.value == kw)
+    def token_is_keyword(self, token, keyword):
+        return token.type == KEYWORD and token.value == keyword
 
     def command(self):
-        current = self.current_token.type
-        command = None
+        current = self.current_token
+        command_name = None
         if current == EOF:
             return
 
         def error(t):
             self.raise_error('invalid token {}'.format(t))
 
-        single_conversion = {
-            ENTER: api.EnterCommand,
-            RETURN: api.ReturnCommand,
-            REMOVE: api.RemoveCommand,
-            EXIT: api.ExitCommand,
-            IN: api.InCommand
-        }
-        if current in single_conversion:
-            self.eat(current)
-            command = single_conversion[current]()
+        if self.token_is_keyword(current, 'new'):
+            self.eat_keyword('new')
+            if self.token_is_keyword(self.current_token, 'data'):
+                self.eat_keyword('data')
+                command_name = 'new_data'
 
-        elif current == NEW:
-            self.eat(NEW)
-            if self.current_token.type == DATA:
-                self.eat(DATA)
-                command = api.NewDataCommand()
-
-            elif self.current_token.type == TAG:
-                self.eat(TAG)
-                command = api.NewTagCommand()
+            elif self.token_is_keyword(self.current_token, 'tag'):
+                self.eat_keyword('tag')
+                command_name = 'new_tag'
             # if this doesn't return, self.raise_error will be called
             # at the bottom
 
-        elif current == EDIT:
-            self.eat(EDIT)
-            if self.current_token.type == DATA:
-                self.eat(DATA)
-                command = api.EditDataCommand()
+        elif self.token_is_keyword(current, 'edit'):
+            self.eat_keyword('edit')
+            if self.token_is_keyword(self.current_token, 'data'):
+                self.eat_keyword('data')
+                command_name = 'edit_data'
 
-            elif self.current_token.type == TAG:
-                self.eat(TAG)
-                if self.current_token.type == NAME:
-                    self.eat(NAME)
-                    command = api.EditTagNameCommand()
+            elif self.token_is_keyword(self.current_token, 'tag'):
+                self.eat_keyword('tag')
+                if self.token_is_keyword(self.current_token, 'name'):
+                    self.eat_keyword('name')
+                    command_name = 'edit_tag_name'
 
-                elif self.current_token.type == VALUE:
-                    self.eat(VALUE)
-                    command = api.EditTagValueCommand()
+                elif self.token_is_keyword(self.current_token, 'value'):
+                    self.eat_keyword('value')
+                    command_name = 'edit_tag_value'
             # if this 2nd level if statement ends, the error will be raised
             # at the end of the method still
 
-        elif current == TEXT:
-            name = self.eat(TEXT)
-            command = api.resolve(name)()
+        elif current.type == KEYWORD:
+            command_name = self.eat(KEYWORD)
 
+        if command_name is None:
+            error(current)
+        command = api.resolve(command_name)()
         if command is None:
             error(current)
 
@@ -184,8 +166,16 @@ class CLIParser(ParserBase):
             self.current_part = structure.End()
 
     def parse_using_signature(self, command):
+        try:
+            signature = command.signature()
+        except TypeError:
+            signature = command.signature
+        if signature is False:
+            raise api.CommandError('command \'{}\' is disabled'.format(
+                command.ID
+            ))
         self.sig = SignatureParser(
-            lexers.SignatureLexer(command.signature),
+            lexers.SignatureLexer(signature),
             command.ID
         )
         self.parts = Buffer(iter(self.sig.make_signature()))
@@ -224,8 +214,7 @@ class CLIParser(ParserBase):
                         )
                 ))
 
-            elif (self.current_token.value == current_part.value
-                  and self.current_token.type in keyword_tokens):
+            elif self.token_is_keyword(self.current_token, current_part.value):
                 self.eat_keyword(current_part.value)
             self.next_part()  # skip regardless (since this is optional)
 
@@ -243,11 +232,11 @@ class CLIParser(ParserBase):
                         )
                     )  # all variable arguments go into a list
             else:  # it's a keyword
-                while (self.current_token.value == current_part.value
-                       and self.current_token.type in keyword_tokens):
-                    if self.current_token.type == TEXT:
+                while self.token_is_keyword(self.current_token,
+                                            current_part.value):
+                    if self.current_token.type == KEYWORD:
                         self.eat_keyword(current_part.value)
-                        # match the value, not type since TEXT can be any value
+                        # match the value, since KEYWORD can be any value
             self.next_part()
 
         elif isinstance(current_part, structure.Input):
@@ -276,8 +265,7 @@ class CLIParser(ParserBase):
             and self.current_token.type == current.type):
             for _ in range(len(self.current_optionals[-1].parts)):
                 self.parse_signature_token()
-        elif (current.type in [*used_tokens.values(), TEXT]
-              and self.current_token.value == current.value):
+        elif self.token_is_keyword(self.current_token, current.value):
             for _ in range(len(self.current_optionals[-1].parts)):
                 self.parse_signature_token()
         self.current_optionals.pop()
@@ -297,8 +285,7 @@ class SignatureParser(ParserBase):
         return ParserBase.eat(self, *args,
             extra='in signature\nfor command \'{}\' (signature: {})'.format(
                 self.name, self.lexer.data
-        )
-        )
+        ))
 
     def make_signature(self):
         parts = [self.get_part()]
@@ -326,9 +313,9 @@ class SignatureParser(ParserBase):
             token = self.current_token
             self.eat(self.current_token.type)
             r = structure.Input(token, self.eat(ARGUMENT))
-        elif self.current_token.type == TEXT:
+        elif self.current_token.type == KEYWORD:
             r = structure.Keyword(self.current_token)
-            self.eat(TEXT)
+            self.eat(KEYWORD)
         elif self.current_token.type == EOF:
             r = structure.End()
         else:
@@ -378,7 +365,7 @@ class Buffer:
 
 
 def _recursive_construct(parser, _depth, _parent, _top_level=False):
-    import plugin
+    import plugins.plugin as plugin
     lookahead = parser.lookahead(1)
     children = []
     parent_list = _parent.parent_list

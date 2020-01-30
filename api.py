@@ -1,13 +1,12 @@
 """API to perform base functions of data traversal."""
 
-import weakref
-
 import structure
 import lexers
 import parsers
 
+
 tree = None
-registry = weakref.WeakValueDictionary()
+registry = {}
 command_queue = []  # the list of current commands that needs to be executed
 post_commands = []
 # commands that will be executed after all of the ones in command_queue have
@@ -102,7 +101,7 @@ class Tree:
 
     def remove_node(self, index=None):
         """Remove the current node and return to parent."""
-        if not hasattr(self.current_node, 'parent'):
+        if not hasattr(self.current_node, 'parent') and index is None:
             # the root doesn't have a parent node
             raise NodeError(
                 'current node is root of the tree and cannot be removed'
@@ -119,11 +118,16 @@ class Tree:
         parent: [optional] the parent of the new node
         return value: Node
         """
+        import plugins.plugin as plugin
         if parent is None:
             parent = self.current_node
-        node = structure.Node(
-            data, parent.depth + 1, parent
+        data = plugin.pre_node_creation_hook(
+            data, parent.depth + 1,
+            parent.traversal_depth
         )
+        node = structure.Node(data, parent.depth + 1, parent)
+        plugin.post_node_creation_hook(node)
+        return node
 
     def edit_tag_name(self, tag, new_tag):
         """Edit the name of one of the current node's tags.
@@ -132,11 +136,17 @@ class Tree:
         new_tag: the new name to replace with
         return value: bool
         """
+        import plugins.plugin as plugin
         try:
             value = self.current_node.tags.pop(tag)
             # this will remove the current key-value pair
         except KeyError:
             raise NodeError('tag not found')
+        if not plugin.tag_name_input_test(self.current_node, value, new_tag):
+            raise NodeError('invalid tag name {}'.format(new_value))
+        value = plugin.tag_name_hook(
+            self.current_node, tag, value, new_tag
+        )
         self.current_node.tags[new_tag] = value
 
     def edit_tag_value(self, tag, new_value):
@@ -146,10 +156,17 @@ class Tree:
         new_value: the new value to replace with
         return value: bool
         """
+        import plugins.plugin as plugin
         try:
             self.current_node.tags[tag]
         except KeyError:
             raise NodeError('tag not found')
+        if not plugin.tag_value_input_test(self.current_node, tag,
+            self.current_node.tags[tag], new_value):
+            raise NodeError('invalid tag value {}'.format(new_value))
+        new_value = plugin.tag_value_hook(
+            self.current_node, tag, self.current_node.tags[tag], new_value
+        )
         self.current_node.tags[tag] = new_value
 
 
@@ -186,7 +203,7 @@ def run():
 
 def prompt():
     """Read CLI input and execute given command(s)."""
-    import plugin
+    import plugins.plugin as plugin
     if tree is None:
         raise NodeError(
             'no data tree created: use api.make_tree(source)'
@@ -212,7 +229,16 @@ def execute_command(command):
         inputs = command.given_inputs
     except AttributeError:
         inputs = command.inputs  # may be an empty dict
-    for i, (name, value) in enumerate(inputs.items()):
+    items = sorted(
+        inputs.items(),
+        key=lambda x: (getattr(
+            getattr(command, 'input_handler_'+x[0], lambda i: None),
+            'priority', 0
+            )
+        ),
+        reverse=True
+    )
+    for i, (name, value) in enumerate(items):
         test = getattr(command, 'input_handler_'+name, lambda i: value)
         try:
             inputs[name] = test(value)
@@ -235,6 +261,9 @@ class Command:
         """Execute the command."""
         pass
 
+    def __init_subclass__(cls):
+        registry[cls.ID] = cls
+
     signature = ''
 
 
@@ -250,23 +279,12 @@ class EnterCommand(Command):
             tree.enter_node(i - 1)  # node 1 is index 0
 
     def input_handler_index(self, i):
-        try:
-            i = int(i)
-        except ValueError:
-            raise InputError('input must be a number')
-        if i < 1:
-            raise NodeError(
-                'index of node must be greater than 0'
-            )
+        test_input(i, 'index of node must be greater than 0',
+                   tests.greater_than(0))
         num = len(tree.current_node.children)
-        if not num:
-            raise NodeError(
-                'current node does not have any entries'
-            )
-        if i > num:
-            raise NodeError(
-                'index of node must not exceed {}'.format(num)
-            )
+        test_input(num, 'current node does not have any entries', bool)
+        test_input(i, 'index of node must not exceed {}'.format(num),
+                   tests.less_equal(num))
         return i
 
     def input_handler_extra(self, inputs):
@@ -285,12 +303,11 @@ class ReturnCommand(Command):
             tree.return_from_node()
 
     def input_handler_depth(self, i):
-        try:
-            i = int(i)
-        except ValueError:
-            raise InputError(
-                'number of depths to return must be an integer'
-            )
+        test_input(i, 'number of depths to return must be greater than 0',
+                   tests.greater_than(0))
+        num = len(tree.traversal_numbers)
+        test_input(i, 'number of depths to return must not exceed {}'
+                   .format(num), tests.less_equal(num))
         return i
 
 
@@ -300,29 +317,67 @@ class RemoveCommand(Command):
     signature = 'NUMBER?=index'
 
     def execute(self, index=None):
-        if self.number is None and not hasattr(tree.current_node, 'parent'):
-            raise NodeError(
-                'current node is the root of the tree and cannot be removed'
-            )
-        if self.number is None:
+        print(repr(index))
+        if index is None:
+            if not hasattr(tree.current_node, 'parent'):
+                raise NodeError('current node is the root of the tree '
+                                'and cannot be removed')
             tree.remove_node()
             return
-        if self.number < 1:
-            raise NodeError('index of node must be greater than 0')
+        tree.remove_node(index - 1)  # node 1 is index 0
+
+    def input_handler_index(self, i):
+        test_input(i, 'index of node must be greater than 0',
+                   tests.greater_than(0))
         num = len(tree.current_node.children)
-        if not num:
-            raise NodeError('current node does not have any entries')
-        if self.number > num:
-            raise NodeError(
-                'index of node must not exceed {}'.format(num)
-            )
-        tree.remove_node(self.number - 1)  # node 1 is index 0
+        test_input(num, 'current node does not have any entries', bool)
+        test_input(i, 'index of node must not exceed {}'.format(num),
+                   tests.less_equal(num))
+        return i
 
 
 class NewDataCommand(Command):
 
     ID = 'new_data'
     signature = 'at NUMBER=position [in NUMBER=node] STRING=data'
+
+    def execute(self, position, data, node=None):
+        if node is not None:
+            node = tree.current_node.children[node-1]
+        else:
+            node = tree.current_node
+        node.children.insert(position-1, tree.new_node(data, parent=node))
+
+    def input_handler_position(self, i):
+        test_input(i, 'position must be greater than index 0',
+                   tests.greater_than(0))
+        if self.inputs.get('node', None) is None:
+            node = tree.current_node
+        else:
+            # in the child node (argument 'in')
+            node = tree.current_node.children[self.inputs['node']]
+        num = len(node.children) + 1
+        # +1 because the extra one is the last non-existent index that
+        # may be created
+        test_input(i, 'position must not exceed index {}'.format(num),
+                   tests.less_equal(num))
+        return i
+
+    def input_handler_node(self, i):
+        test_input(i, 'node index must be greater than 0',
+                   tests.greater_than(0))
+        num = len(tree.current_node.children)
+        test_input(i, 'node index must not exceed {}'.format(num),
+                   tests.less_equal(num))
+        return i
+
+    def input_handler_data(self, i):
+        test_input(i, 'data cannot be empty', lambda x: not str.isspace(x),
+                   bool)
+        return i
+
+    input_handler_node.priority = 1
+    input_handler_data.priority = 2
 
 
 class NewTagCommand(Command):
@@ -354,7 +409,7 @@ class ExitCommand(Command):
     ID = 'exit'
 
     def execute(self):
-        print('Exiting...')  # add 'do you want to save?'
+        print('Exiting...')
         exit()
 
 
@@ -372,11 +427,6 @@ class InCommand(Command):
         post_commands.append(r)
 
 
-class CustomCommand(Command):
-    def __init_subclass__(cls):
-        registry[cls.ID] = cls
-
-
 def resolve(name):
     """Try to find a CustomCommand subclass which has the given name.
 
@@ -387,3 +437,77 @@ def resolve(name):
         return registry[name]
     except KeyError:
         raise CommandError('unknown command \'{}\''.format(name))
+
+
+def test_input(input, message, *tests):
+    """Raise an error if the test function fails."""
+    try:
+        if not all(test(input) for test in tests):
+            raise InputError
+    except (NodeError, InputError, ValueError, TypeError):
+        raise InputError(message)
+
+
+class tests:
+    """A collection of tests for input handlers."""
+
+    @staticmethod
+    def not_empty(input):
+        """Test if input is not empty (any data type)."""
+        return bool(input)
+
+    @staticmethod
+    def integer(input):
+        try:
+            int(input)
+        except ValueError:
+            return False
+        return True
+
+    @staticmethod
+    def numerical(input):
+        try:
+            float(input)
+        except ValueError:
+            return False
+        return True
+
+    @staticmethod
+    def not_whitespace(input):
+        """Test if input contains only whitespace."""
+        return str(input).isspace()
+
+    @staticmethod
+    def in_range(x, y):
+        """Return function to test x <= input <= y."""
+        def within_range(input):
+            return x <= input <= y
+        return within_range
+
+    @staticmethod
+    def greater_than(x):
+        """Return function to test input > x."""
+        def greater(input):
+            return input > x
+        return greater
+
+    @staticmethod
+    def less_than(x):
+        """Return function to test input < x."""
+        def less(input):
+            return input < x
+        return less
+
+    @staticmethod
+    def greater_equal(x):
+        """Return function to test input >= x."""
+        def greater_eq(input):
+            return input >= x
+        return greater_eq
+
+    @staticmethod
+    def less_equal(x):
+        """Return function to test input <= x."""
+        def less_eq(input):
+            return input <= x
+        return less_eq

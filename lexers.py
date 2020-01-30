@@ -1,4 +1,4 @@
-"""Lexers for data input and search mini-language."""
+"""Lexers for data input, CLI and command signatures."""
 
 from string import (ascii_letters, digits, whitespace, ascii_uppercase,
                     ascii_lowercase)
@@ -23,45 +23,15 @@ EQUAL = 'EQUAL'
 # for CLI lexer:
 NUMBER = 'NUMBER'
 STRING = 'STRING'
-ENTER = 'ENTER'
-EXIT = 'EXIT'
-RETURN = 'RETURN'
-REMOVE = 'REMOVE'
-NEW = 'NEW'
-EDIT = 'EDIT'
-IN = 'IN'
-AT = 'AT'
-OF = 'OF'
-DATA = 'DATA'
-NAME = 'NAME'
-VALUE = 'VALUE'
-# also re-use TAG + TEXT (for custom commands)
+KEYWORD = 'KEYWORD'
 SEMICOLON = 'SEMICOLON'  # to separate commands
+# for command signatures:
 LBRACKET = 'LBRACKET'
-RBRACKET = 'RBRACKET'  # these ones for command signatures
+RBRACKET = 'RBRACKET'
 OPTIONAL = 'OPTIONAL'
 VARIABLE = 'VARIABLE'
 ARGUMENT = 'ARGUMENT'  # in signatures 'NUMBER=index' where argument is =index
 EOF = 'EOF'
-
-reserved_keywords = {
-    'enter': Token(ENTER, 'enter'),
-    'exit': Token(EXIT, 'exit'),
-    'return': Token(RETURN, 'return'),
-    'remove': Token(REMOVE, 'remove'),
-    'new': Token(NEW, 'new'),
-    'edit': Token(EDIT, 'edit'),
-    'in': Token(IN, 'in'),
-    'at': Token(AT, 'at'),
-    'of': Token(OF, 'of'),
-    'data': Token(DATA, 'data'),
-    'name': Token(NAME, 'name'),
-    'value': Token(VALUE, 'value'),
-    'tag': Token(TAG, 'tag'),
-}  # map keyword to its custom keyword token
-
-used_tokens = {v.value: v.type for k, v in reserved_keywords.items()}
-# map keyword to its custom token type
 
 
 class LexerBase:
@@ -205,10 +175,7 @@ class CLILexer(LexerBase):
             # within the word (not as the start character)
             r += self.advance()
         r = r.lower()
-        return reserved_keywords.get(
-            r,
-            Token(TEXT, r)
-        )  # attempt to match text to reserved keyword
+        return Token(KEYWORD, r)
 
     def collect_string(self):
         r = ''
@@ -280,7 +247,7 @@ class SignatureLexer(LexerBase):
         if upper and r in ('NUMBER', 'STRING'):
             token = Token(r, r)  # these literals have to be uppercase
         else:
-            token = Token(TEXT, r.lower())  # only commands as lowercase
+            token = Token(KEYWORD, r.lower())  # only commands as lowercase
         if self.current == '*':
             self.queued_tokens.append(token)
             token = Token(VARIABLE, token.value + self.advance())

@@ -1,6 +1,6 @@
 CHANGELOG:
-[FORMAT: - dd/mm//yy: change + info]
-some entries marked with asterisk may have changed
+[FORMAT: - dd/mm/yy: change + info]
+some entries marked with an asterisk may have changed
 
 - 21/12/19: started DSL for database traversal
 - 28/12/19: added new command to add new tags
@@ -75,12 +75,14 @@ some entries marked with asterisk may have changed
                 NodeError or InputError if the value is invalid
                 [DEPRECATED ON 22/01/20]
 - 17/01/20: added CLIParser.eat_keyword(kw) to eat TEXT tokens, but also
-            checking that token.value == kw
+        **  checking that token.value == kw
+            [TEXT changed to KEYWORD on 26/01/20]
 - 17/01/20: parser now will resolve the name of a keyword to a custom command
             from the plugin, if defined
-            - custom command must subclass api.CustomCommand
+        **  - custom command must subclass api.CustomCommand
             - must have .id attribute (single word string) so that the parser
               knows which keyword it is for
+            [CHANGED ON 27/01/20]
 - 17/01/20: all commands must now have a .signature attribute to tell the
             parser how to parse it
               - signature = 'STRING of NUMBER' would be a signature to a
@@ -101,7 +103,7 @@ some entries marked with asterisk may have changed
               - STRING, NUMBER designate where inputs are (and obviously their
                 type)
               - any lowercase words are keywords
-- 22/01/20: 'literal_input' for commands with %input% is now deprecated: use#
+- 22/01/20: 'literal_input' for commands with %input% is now deprecated: use
             either strings or numbers instead for inputs to arguments
 - 22/01/20: command signatures must now assign names to inputs using '=name'
             syntax:
@@ -148,6 +150,44 @@ some entries marked with asterisk may have changed
             - the next commands to execute MUST be written in the same CLI
               prompt (separated by semicolons) so they all get executed in the
               same loop
+- 26/01/20: for easier parsing, custom keyword tokens (e.g. ENTER, REMOVE) have
+            been renamed to KEYWORD so that a single equality check can be
+            carried out to check whether a token is a keyword
+            - CLIParser.token_is_keyword(token, keyword) implemented to check
+              whether token.value == keyword and token.type == KEYWORD
+- 26/01/20: default ReturnCommand now raises an error if the number of depths
+            to return is more than the current depth
+- 27/01/20: added 'tests' class to api to hold input tests:
+            - tests.not_empty -> bool
+            - tests.integer -> can the input be converted to an int
+            - tests.numerical -> can the input be converted to float
+            - tests.non_whitespace -> is the input (str) only whitespace
+            - tests.in_range(x, y) -> is input in the range (inclusive of both)
+            - tests.greater_than(x), greater_equal(x), less_than(x),
+              less_equal(x) -> does the input satisfy the operation
+- 27/01/20: added test_input(input, message, *tests) to raise an error if any
+            of the test functions fail (test functions must accept input as
+            a single argument)
+- 27/01/20: all custom commands must now subclass api.Command
+            - (api.registry now contains the default commands too)
+- 27/01/20: added optional Command.signature() FUNCTION to return a dynamic
+            signature based on any condition (e.g. current node)
+            - if different signatures have different input parameters, they all
+              must be included in Command.execute(...) as optional arguments
+              unless every possible signature generated has the input name
+            - if the methods returns False, the command classed as 'disabled'
+              and it cannot be executed at that point
+- 27/01/20: added calls to plugin hooks in api.Tree base commands
+- 28/10/20: moved plugin.py to plugins/plugin.py for future plans for multiple
+            plugins
+- 30/01/20: added optional attribute 'priority' that can be set on input
+            handler functions to define the order in which inputs are checked:
+            - priority 0 is default / undefined value (last)
+            - higher priority means it will be checked first
+- 30/01/20: re-implemented 'remove [n]' with new input checking and signature
+            parsing
+- 30/01/20: implemented 'new data at n [in n] 'data'' command
+            - this command uses the input handler priority check to
 
 
 
@@ -156,15 +196,11 @@ implementing default commands
 
 NEXT UP:
 
-make all IN/ENTER/REMOVE/RETURN tokens -> TEXT tokens for easier parsing
-(perhaps rename TEXT to KEYWORD)
 
 
 TODO:
 
-[For API and plugins]
-- refer to plugins for custom input handlers!!
-- add call to plugin hooks in api.Tree methods
+[API and plugins]
 
 - consider adding a 'master' command execution hook so that a plugin can 
   intercept command calls and delegate calls to their custom hooks instead
@@ -197,11 +233,5 @@ TODO:
 [Input-related things]
 - change sample_data.txt as input to sys.argv[1] or something else
 
-[API]
-
 
 OTHER:
-
-- make sure that the api keeps track of current_node/traversal_depth
-  automatically, not for the plugin to handle!
-- refer to plugins for custom input handlers!
