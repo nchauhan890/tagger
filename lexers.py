@@ -31,11 +31,30 @@ RBRACKET = 'RBRACKET'
 OPTIONAL = 'OPTIONAL'
 VARIABLE = 'VARIABLE'
 ARGUMENT = 'ARGUMENT'  # in signatures 'NUMBER=index' where argument is =index
+LESS = 'LESS'
+GREATER = 'GREATER'
+OR = 'OR'
+LPAREN = 'LPAREN'
+RPAREN = 'RPAREN'
 EOF = 'EOF'
+
+
+_single_char_conversion = {
+    '[': LBRACKET,
+    ']': RBRACKET,
+    '?': OPTIONAL,
+    '*': VARIABLE,
+    '<': LESS,
+    '>': GREATER,
+    '|': OR,
+    '(': LPAREN,
+    ')': RPAREN,
+}
 
 
 class LexerBase:
     """Base class to perform essential lexer functions."""
+
     def __init__(self, text):
         self.data = text
         self.pos = 0
@@ -99,6 +118,7 @@ class LexerBase:
 
 class InputLexer(LexerBase):
     """Tokenise a data source."""
+
     def asterisk(self):
         r = ''
         while self.current == '*':
@@ -161,6 +181,7 @@ class InputLexer(LexerBase):
 
 class CLILexer(LexerBase):
     """Tokenise a CLI input."""
+
     def collect_number(self):
         r = ''
         while self.current and self.current in digits:
@@ -201,6 +222,9 @@ class CLILexer(LexerBase):
             return Token(NUMBER, self.collect_number())
         elif char in ascii_letters + '_':
             return self.collect_text()
+        elif char == '?':
+            self.advance()
+            return Token(KEYWORD, 'help')
         elif char == '\'':
             return Token(STRING, self.collect_string())
         elif char == ';':
@@ -210,19 +234,18 @@ class CLILexer(LexerBase):
 
 class SignatureLexer(LexerBase):
     """Tokenise a command signature."""
+
     def generate_token(self):
         char = self.current
         if char.isspace():
             char = self.skip_whitespace()
         if not char:
             return Token(EOF, None)
-        if char == '[':
-            return Token(LBRACKET, self.advance())
-        elif char == ']':
-            return Token(RBRACKET, self.advance())
         elif char == '=':
             self.advance()  # skip '='
             return Token(ARGUMENT, self.argument())
+        elif char in _single_char_conversion:
+            return Token(_single_char_conversion[char], self.advance())
         elif char in ascii_uppercase:
             return self.collect_text(upper=True)
         elif char in ascii_lowercase + '_':
@@ -248,12 +271,6 @@ class SignatureLexer(LexerBase):
             token = Token(r, r)  # these literals have to be uppercase
         else:
             token = Token(KEYWORD, r.lower())  # only commands as lowercase
-        if self.current == '*':
-            self.queued_tokens.append(token)
-            token = Token(VARIABLE, token.value + self.advance())
-        elif self.current == '?':
-            self.queued_tokens.append(token)
-            token = Token(OPTIONAL, token.value + self.advance())
         return token
 
     def argument(self):

@@ -51,14 +51,13 @@ command; command[; command]*
 
 Defining custom commands:
 - in plugin.py, define a class which subclasses api.Command
-- add the attribute Command.ID which must be a single keyword that defines
-  which keyword will call the command
+- add the attribute Command.ID which can be a single keyword or multiple
+  keywords that define the keyword(s) bound to the command
 - [optional] add the attribute Command.signature which defines how to parse
   inputs to the command
-- [OR, instead of the previous] add the method Command.signature(self) which
-  returns a dynamic signature (it can also return False to indicate the
-  command is disabled and cannot be parsed, but still manually executed)
-- [optional, ignore for most commands] add the attribute Command.given_inputs
+- [OR, instead of the previous] add the classmethod/staticmethod
+  Command.signature(cls?) which returns a dynamic signature
+- [optional, ignore for most commands] add the attribute Command.inputs
   which must be a dict whose keys are strings of the names of the inputs to
   the command (should match input names in signature)
 - add method Command.execute(self, *args, **kw) where required arguments have
@@ -69,6 +68,9 @@ Defining custom commands:
 - [optional] for any input handler, add the attribute input_handler_x.priority
   which defines the order in which inputs are checked (default 0, higher
   numbers will be checked first)
+- [optional] add the classmethod/staticmethod command.disabled(cls?) which
+  can return True to indicate the command is disabled in the current context
+  and cannot be parsed (but still manually executed)
 
 Writing command signatures:
 - signatures define how custom commands and their inputs are parsed
@@ -87,25 +89,37 @@ NUMBER=arg
 lowercase_word
 - accept a keyword
 
-STRING*=arg
-NUMBER*=arg
+<flag>
+<multiple keyword flag>
+- accept a (keyword) flag
+
+STRING=arg*
+NUMBER=arg*
 keyword*
 - accept a variable number of inputs here (maybe none)
 - (inputs added to list and passed under name 'arg')
-- asterisk (*) must come after keyword/input and before the equals sign
 
-STRING?=arg
-NUMBER?=arg
+STRING=arg?
+NUMBER=arg?
 keyword?
 - accept an input/keyword if present
 - question mark must come after keyword/input and before equals sign
 
-[phrase]
+[<phrase>]
 - accept the phrase (a list of elements) inside if present
 - (the first element of the phrase is checked only: if it present, the rest is
    assumed to follow)
 - phrase can be any length
 - nested [optional phrases] are allowed
+
+(<phrase>)
+- accept the phrase
+
+<element>|<element>
+<element>|<element>|<element>|...
+- accept either element, but not both/all
+- parenthesised groups must be used if multiple elements are required
+  in each 'section' of the OR expression
 
 
 
@@ -132,3 +146,24 @@ tag_value_hook(node, tag, old, new) -> value of tag
 - edit tag value before being assigned
 tag_value_input_test(node, tag, old, new) -> bool
 - custom logic to check new tag values e.g. make sure not empty
+
+
+Data source:
+
+- restricted characters are asterisk (*) and backtick (`)
+- these can be escaped with \* and \` respectively
+- equal (=) is only restricted in tags and can be escaped with \=
+- a backslash can be escaped with \\
+
+- data can only span multiple lines if the line ends with a \
+  (backslash) for line continuation
+
+- the 1st line of the input data is a required field - it is the title
+  of the tree
+- the 2nd line is optional and is the author field
+- the 3rd line is optional and is the description field
+- any other fields can be addded, but they must be written as a tag
+  to give their name and value
+- all of the inital lines - title, [author, description], [other]* - will
+  be added as tags of the root node
+- tag names will have whitespace removed and cannot have blank names

@@ -129,6 +129,14 @@ class Keyword(SignaturePattern):
     pass
 
 
+class Flag(SignaturePattern):
+    def __init__(self, pattern):
+        self.parts = pattern.parts  # a Phrase object
+        self.type = pattern.type
+        self.value = pattern.value
+        self.name = '_'.join([kw.value for kw in self.parts])
+
+
 class Input(SignaturePattern):
     """Represents the STRING or NUMBER input field in signatures."""
     def __init__(self, token, argument_name):
@@ -136,10 +144,24 @@ class Input(SignaturePattern):
         self.argument = argument_name
 
 
+class Or(SignaturePattern):
+    def __init__(self, parts):
+        self.parts = parts
+        self.type = self.parts[0].type
+        self.value = self.parts[0].value
+
+
 class End(SignaturePattern):
     def __init__(self):
         self.type = 'EOF'
         self.value = None
+
+
+class Phrase(SignaturePattern):
+    def __init__(self, parts):
+        self.parts = parts
+        self.type = self.parts[0].type
+        self.value = self.parts[0].value
 
 
 class OptionalPhrase(SignaturePattern):

@@ -115,15 +115,16 @@ some entries marked with an asterisk may have changed
               as a list, even if it contains a single input
               (therefore, input checkers will return a list of values too)
 - 22/01/20: added optional Command.given_inputs attribute to assign
-            pre-defined inputs to commands
-              - this can be defined either in the class body or assigned to a
-                single instance of an api.Command subclass
-              - must be given as a dict whose keys are strings of the parameter
-                names
-              - if given, these arguments will be used as inputs (even if it
-                is an empty dict)
-              - e.g. the InCommand uses this to run the EnterCommand in its
-                execute method
+        **  pre-defined inputs to commands
+            - this can be defined either in the class body or assigned to a
+              single instance of an api.Command subclass
+            - must be given as a dict whose keys are strings of the parameter
+              names
+            - if given, these arguments will be used as inputs (even if it
+              is an empty dict)
+            - e.g. the InCommand uses this to run the EnterCommand in its
+              execute method
+              [CHANGED ON 18/02/20]
 - 22/01/20: post_commands list added as a secondary command queue whose
             commands are only run after ALL of the commands in the main queue
             have finished
@@ -134,7 +135,7 @@ some entries marked with an asterisk may have changed
               must have a default value as they may not be present in the
               input dict
 - 22/01/20: new arg checking is all put into api.execute_command(command):
-            - if Command.given_inputs is present, use this instead of
+        **  - if Command.given_inputs is present, use this instead of
               Command.inputs
             - for each input in the whichever dict is used, the method
               'input_handler_x' will be called on the command object for an
@@ -143,6 +144,7 @@ some entries marked with an asterisk may have changed
                to signal that the input is invalid, otherwise return a value
                to use)
             - finally, the command is run
+              [CHANGED ON 18/02/20]
 - 23/01/20: implemented InCommand to temporarily enter the given node to
             perform the next command(s), then return back to the parent:
             - currently does not protect against using the return command so
@@ -174,9 +176,14 @@ some entries marked with an asterisk may have changed
             signature based on any condition (e.g. current node)
             - if different signatures have different input parameters, they all
               must be included in Command.execute(...) as optional arguments
-              unless every possible signature generated has the input name
-            - if the methods returns False, the command classed as 'disabled'
-              and it cannot be executed at that point
+              unless every possible signature generated has the same input
+              names
+        **  - if the methods returns False, the command classed as 'disabled'
+              and it cannot be parsed at that point
+        **  - (however, the command can still be executed when 'disabled'
+               if is it instantiated by Command(), assigned inputs to
+               Command.given_inputs and finally then executed)
+              [CHANGED (both) ON 18/02/20]
 - 27/01/20: added calls to plugin hooks in api.Tree base commands
 - 28/10/20: moved plugin.py to plugins/plugin.py for future plans for multiple
             plugins
@@ -187,15 +194,151 @@ some entries marked with an asterisk may have changed
 - 30/01/20: re-implemented 'remove [n]' with new input checking and signature
             parsing
 - 30/01/20: implemented 'new data at n [in n] 'data'' command
-            - this command uses the input handler priority check to
+            - this command uses the input handler priority check to validate
+              'data' and 'node' before 'position'
+- 31/01/20: changed main.py to __main__.py and data source is now sys.argv[1]
+            - use 'python -m tagger <file>' to execute
+- 06/02/20: when duplicate tag names are found in the data source, instead of
+            being overwritten, they are accumulated into a list
+- 06/02/20: added 'save' command which, at the moment, will save the current
+            changes to 'output.txt' in the directory of the data source file
+- 07/02/20: at startup, the parser will use post_node_creation hook, AFTER the
+            the node has had its tags added
+- 07/02/20: parsers.construct_tree now also calls plugin hooks for tag names
+            and values
+- 07/02/20: added class AppendTagValueCommand (not implemented) to add to a tag
+            that is/will become a list
+- 07/02/20: added api.Tree.new_tag and api.Tree.append_tag_value
+- 07/02/20: implemented 'new tag [in n] 'name' 'value?''
+- 07/02/20: added tests.is_valid_child_index(node, true_index=False) to check
+            if a numerical input could be used as an index of a child node
+        **  - true_index shifts the test values down by 1, so it treats the
+              index as starting from 0, not 1 as default
+            [ADDED TO ON 08/02/20]
+- 08/02/20: 'edit tag value' command to accept any number of values (to
+            combine into a list if multiple values added)
+- 08/02/20: api.test_input now accepts a list as the 'message' argument which
+            will select an error message based on the return value of the test
+            function (indexes of the list)
+- 08/02/20: registerd plugins will be printed out on startup
+- 08/02/20: api.tests.is_valid_child_index will now return 0, 1, 2 to be used
+            with dynamic messages in api.test_input:
+            - return 0 if input not an integer
+            - return 1 if input is 0 or less
+            - return 2 if input exceeds upper limit
+            - otherwise return True
+- 09/02/20: added help command which can be triggered using either 'help' or
+            '?':
+            - accept an optional string argument which looks for a registered
+              command
+- 09/02/20: changed optional signature function in commands so they must return
+            a signature:
+            - to indicate whether disabled, create another method that
+              return True (disabled) or False
+            - this method must be a classmethod (use @classmethod decorator)
+              or staticmethod
+- 11/02/20: command IDs can now be multiple words (space separated) e.g.
+            the 'edit tag value' command
+            - the pre-existing multi-word commands are no longer hard-coded
+              in the parser
+- 11/02/20: added api.Tree.remove_tag(tag, node=None) command
+- 13/02/20: moved functions inside api.Tree to the global scope in api.py and
+            api.Tree only holds the current node, traversal numbers and the
+            structure.Root node
+- 13/02/20: modified some commands to use new tests.is_valid_child_index test
+- 13/02/20: added api.APIWarning class to indicate bad practice or possible
+            errors that won't break the program
+            - api.make_tree now raises a warning, not an error if the tree is
+              overwritten
+            - by default, warnings are printed but won't end the CLI
+- 15/02/20: added api.resolve_child(indexes, node=None, offset=False) to
+            check whether the list of indexes is valid path to a child i.e.
+            check if the following is a valid child of the current node (or
+            other node if given):
+            - node.children[indexes[0]].children[indexes[1]]
+              .children[indexes[2]]...children[indexes[n]]
+            - if offset = True, assume the indexes start as 1, as opposed to 0
+            - if the indexes are valid, the child node is returned, otherwise
+              IndexError is raised
+            - negative indexes are not allowed
+            - 0 is nto allowed as an index if offset = True as it will
+              become -1
+- 16/02/20: added flags and changed command signatures:
+        **  - flags are optional keywords in the form 'keyword!'
+            - any modifiers (?, *) go after the whole element i.e.
+              'NUMBER=arg?', 'STRING=data*'
+            - flags are accessible in Command.inputs during execution (True or
+              False bool values)
+            - all inputs to the command are in Command.inputs even if not
+              present
+            - optional Command.given_inputs renamed to Command.inputs
+            - Command.defaults is a dict containing default values for command
+              parameter
+            - if Command.defaults not found, input handlers for command inputs
+              should return a default value (None will be passed as the
+              'value' to indicate no argument given)
+            - if the default value is found in Command.defaults and there is a
+              matching input handler, it will NOT be called
+              [CHANGED ON 19/02/20]
+- 18/02/20: implemented OR and parenthesised phrases in command signatures:
+            - pipe character '|' indicates OR - e.g. 'a|b' means the keyword
+              'a' or 'b' must follow, but not both
+            - parenthesised phrases use the form '(element+)' and cannot be
+              empty
+            - on their own, they will be parsed as if not present, but are used
+              in OR expressions to group '(phrase_a) | (phrase_b)' (phrase_a
+              OR phrase_b)
+- 18/02/20: changed syntax of 'help' command to leverage dynamic signatures
+            and flags:
+            - instead of typing the command name enclosed in a string, now just
+              type 'help command name' where 'command name' is a registered
+              command
+            - this uses a dynamic signature to return all of the command names
+              separated by OR ('|')
+- 19/02/20: changed flag command signature syntax to '<flag>' to accommodate
+            multi-word flags:
+            - syntax is the same: '<multi keyword flag>']
+            - since spaces cannot be used as python parameter names in
+              functions, names will have their spaces changed to underscores
+              e.g. '<multi keyword flag>' passed as 'multi_keyword_flag'
+            - mutually exclusive flags can be created by combining flags with
+              OR - e.g. '<flag_a> | <flag_b>'
+            - multi-keyword flags that are used in OR expressions do not need
+              to be parenthesised since the '<...>' will enclose the flag's
+              components into a single element anyway
+- 19/02/20: added api.fill_missing_args(command, args) which returns a dict of
+            inputs to the command, filling in missing values with their
+            defaults (used when manaually executing command from other ones):
+            - 'args' are the given arguments that will be passed
+            - 'command' is the command being run
+- 19/02/20: added api.manual_execute(command, args) so users can easily execute
+            other functions from commands manually
+            - 'command' should be the ID of the command, although instances
+              or subclasses of Command are accepted
+            - arguments will still be checked as they pass through
+              api.execute_command(c)
+
 
 
 
 IN PROGRESS:
-implementing default commands
+implementing default commands - ones left to do:
+- edit data
+- edit tag name
+- edit tag value
+- append tag value ** mark change on changelog from 07/02
+
 
 NEXT UP:
 
+add verbose option
+in api.manual_execute, add options to queue the command in command_queue or
+post_commands (with index)
+- add ALL the plugin hooks for EACH API base function SEPRATELY
+- dot parsing in command signatures (e.g. 2.1.3) and check if node.node.node is
+  a valid or child that exists
+- stop importing the plugin and make all commands/hooks register to api
+  (by putting hooks in a class)
 
 
 TODO:
@@ -209,6 +352,10 @@ TODO:
   - this could allow plugins to interact
 
 - add 'do you want to save?' option before exiting
+  (add back input_handler function and pre-written functions like
+   get_yes_or_no from the unseen pre-pre-release version)
+
+- add environment variables $depth $data (perhaps?)
 
 
 [Commands-related things]
@@ -231,7 +378,6 @@ TODO:
 
 
 [Input-related things]
-- change sample_data.txt as input to sys.argv[1] or something else
 
 
 OTHER:

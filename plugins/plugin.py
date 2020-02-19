@@ -1,6 +1,7 @@
 """Plugin for API execution hooks and custom commands."""
 
-import api
+
+from tagger import api
 
 
 def pre_node_creation_hook(data, depth, parents):
@@ -24,7 +25,9 @@ def post_node_creation_hook(node):
     return value: None
     """
     if node.depth < 4:
-        node.tags[('character', 'quote', 'analysis')[node.depth - 1]] = None
+        type = ('character', 'quote', 'analysis')[node.depth - 1]
+        if type not in node.tags:
+            node.tags[type] = None
 
 
 def tag_name_hook(node, old, new):
@@ -106,6 +109,8 @@ def display_hook(current):
         if v is None:
             string = '\n'.join([string, '{}• {}'.format('  ' * i, k)])
         else:
+            if isinstance(v, list):
+                v = ', '.join([str(vi) for vi in v])
             string = '\n'.join([string, '{}• {}: {}'.format('  ' * i, k, v)])
 
     if current.children:
@@ -145,8 +150,9 @@ class ShowChildrenCommand(api.Command):
 
     ID = 'children'
 
-    def signature(self):
-        return '' if api.tree.current_node.children else False
+    @staticmethod
+    def disabled():
+        return not bool(api.tree.current_node.children)
 
     def execute(self):
         for i, node in enumerate(api.tree.current_node.children, 1):
@@ -157,7 +163,19 @@ class ExampleCommand(api.Command):
 
     ID = 'example'
     signature = ('STRING=data [of NUMBER=node] [in NUMBER=pos] '
-                 'NUMBER?=repeats STRING*=conditions keyword?')
+                 'NUMBER=repeats? STRING=conditions* keyword?')
+    defaults = {'node': 0, 'pos': 0, 'repeats': 1, 'conditions': None}
 
     def execute(self, data, node=0, pos=0, repeats=1, conditions=None):
         print('this command is to demonstrate signature parsing only')
+
+
+class FlagCommand(api.Command):
+
+    ID = 'flag'
+    signature = '<one> <two> <three>'
+
+
+class MutuallyExclusiveFlagCommand(api.Command):
+    ID = 'f'
+    signature = '<one>|<two three>'

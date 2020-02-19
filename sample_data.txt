@@ -12,6 +12,9 @@ A collection of quotes and analysis categorised by character
 **"Nothing to do with you, Sheila. Run Along."
 **"Like some bees \
 in a hive"
+**"famous younger generation"
+**`link=Sheila
+**`link=Eric
 
 *Mrs Birling
 **"girls of that class"
@@ -28,22 +31,3 @@ in a hive"
 *Inspector Goole
 **"(impressively)"
 **`stage direction
-
-
-# restricted characters are asterisk (*) and backtick (`)
-# these can be escaped with \* and \` respectively
-# equal (=) is only restricted in tags and can be escaped with \=
-# a backslash can be escaped with \\
-
-# data can only span multiple lines if the line ends with a \
-# (backslash) for line continuation
-
-# the 1st line of the input data is a required field - it is the title
-# of the tree
-# the 2nd line is optional and is the author field
-# the 3rd line is optional and is the description field
-# any other fields can be addded, but they must be written as a tag
-# to give their name and value
-# all of the inital lines - title, [author, description], [other]* - will
-# be added as tags of the root node
-# tag names will have whitespace removed and cannot have blank names
