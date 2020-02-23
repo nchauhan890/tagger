@@ -3,12 +3,10 @@
 
 class Root:
     """Base of the data tree."""
-    def __init__(self, name, author='', description='', other=None):
-        other = other or {}
+    def __init__(self, name, tags=None):
+        tags = tags or {}
         self.data = name
-        self.tags = {
-            'author': author, 'description': description, **other
-        }
+        self.tags = tags
         self.children = []
         self.depth = 0
 
@@ -17,8 +15,7 @@ class Root:
 
     @property
     def parent_list(self):
-        return []
-        # property to make it read-only
+        return []  # property to make it read-only
 
     @property
     def traversal_depth(self):

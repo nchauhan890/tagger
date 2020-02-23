@@ -1,6 +1,6 @@
 An Inspector Calls
-J. B. Priestley
-A collection of quotes and analysis categorised by character
+`author=J. B. Priestley
+`description=A collection of quotes and analysis categorised by character
 `written=1944-45
 `set=1912
 `nesting structure=Characters --> Quotes --> Analysis

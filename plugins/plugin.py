@@ -27,7 +27,7 @@ def post_node_creation_hook(node):
     if node.depth < 4:
         type = ('character', 'quote', 'analysis')[node.depth - 1]
         if type not in node.tags:
-            node.tags[type] = None
+            api.new_tag(type, node=node)
 
 
 def tag_name_hook(node, old, new):
@@ -159,14 +159,22 @@ class ShowChildrenCommand(api.Command):
             print('{:>3} {}'.format(i, node.data))
 
 
+class ShowCommand(api.Command):
+
+    ID = 'show'
+
+    def execute(self):
+        print(display_hook(api.tree.current_node))
+
+
 class ExampleCommand(api.Command):
 
     ID = 'example'
     signature = ('STRING=data [of NUMBER=node] [in NUMBER=pos] '
                  'NUMBER=repeats? STRING=conditions* keyword?')
-    defaults = {'node': 0, 'pos': 0, 'repeats': 1, 'conditions': None}
+    defaults = {'node': 0, 'pos': 0, 'repeats': 1}
 
-    def execute(self, data, node=0, pos=0, repeats=1, conditions=None):
+    def execute(self, data, node, pos, repeats, conditions):
         print('this command is to demonstrate signature parsing only')
 
 
@@ -175,7 +183,14 @@ class FlagCommand(api.Command):
     ID = 'flag'
     signature = '<one> <two> <three>'
 
+    def execute(self, one, two, three):
+        print('one:', one)
+        print('two:', two)
+        print('three:', three)
+        print('this command is to demonstrate flags only')
+
 
 class MutuallyExclusiveFlagCommand(api.Command):
     ID = 'f'
     signature = '<one>|<two three>'
+

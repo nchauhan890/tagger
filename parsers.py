@@ -523,28 +523,9 @@ def _recursive_construct(parser, _depth, _parent, _top_level=False):
                 current.value = plugin.tag_value_hook(
                     children[-1], current.data, None, current.value
                 )
-                if current.data in tags:
-                    if (isinstance(tags[current.data], list) and
-                        current.value not in tags[current.data]):
-                        # don't add duplicate values to list
-                        tags[current.data].append(current.value)
-                    else:
-                        tags[current.data] = [tags[current.data],
-                                              current.value]
-                else:
-                    if not plugin.tag_name_input_test(
-                            children[-1], None, current.data
-                        ):
-                        raise api.NodeError('invalid tag name {}'.format(
-                            current.data
-                        ))
-                    if not plugin.tag_value_input_test(
-                            children[-1], current.data, None, current.value
-                        ):
-                        raise api.NodeError('invalid tag value {}'.format(
-                            current.value
-                        ))
-                    children[-1].tags[current.data] = current.value
+                api.append_tag_value(
+                    current.data, current.value, node=children[-1], create=True
+                )
             else:
                 data = plugin.pre_node_creation_hook(
                     current.data, _depth,
@@ -570,16 +551,11 @@ def _recursive_construct(parser, _depth, _parent, _top_level=False):
 
 def construct_tree(parser):
     parser = Buffer(parser)
-    title, author, desc = next(parser).data, '', ''
-    if isinstance(parser.lookahead(1), structure.TextPattern):
-        author = next(parser).data
-    if isinstance(parser.lookahead(1), structure.TextPattern):
-        desc = next(parser).data
-    other = {}
+    title = next(parser).data
+    root = structure.Root(title)
     while isinstance(parser.lookahead(1), structure.TagPattern):
         pattern = next(parser)
-        other[pattern.data] = pattern.value
-    root = structure.Root(title, author, desc, other)
+        api.append_tag_value(pattern.data, pattern.value, root, create=True)
     root.children.extend(_recursive_construct(
         parser, _depth=0, _parent=root, _top_level=True
     ))

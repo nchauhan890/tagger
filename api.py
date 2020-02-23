@@ -12,6 +12,7 @@ data_source = ''
 registry = {}
 command_queue = []  # the list of current commands that needs to be executed
 post_commands = []
+WARNING = False
 # commands that will be executed after all of the ones in command_queue have
 # finished (used for InCommand)
 
@@ -123,12 +124,13 @@ def new_node(data, parent=None):
     return node
 
 
-def edit_tag_name(tag, new_tag, node=None):
+def edit_tag_name(tag, new_tag, node=None, create=False):
     """Edit the name of one of the current node's tags.
 
     tag: the name of the tag to edit
     new_tag: the new name to replace with
     node: [optional] node to use instead
+    create: [optional] create a new tag if the tag doesn't exist
     """
     if node is None:
         node = tree.current_node
@@ -137,6 +139,9 @@ def edit_tag_name(tag, new_tag, node=None):
         value = tree.current_node.tags.pop(tag)
         # this will remove the current key-value pair
     except KeyError:
+        if create:
+            new_tag(new_tag, None, node)
+            return
         raise NodeError('tag \'{}\' not found'.format(tag))
     if not plugin.tag_name_input_test(node, value, new_tag):
         raise NodeError('invalid tag name {}'.format(new_value))
@@ -144,12 +149,13 @@ def edit_tag_name(tag, new_tag, node=None):
     node.tags[new_tag] = value
 
 
-def edit_tag_value(tag, new_value):
+def edit_tag_value(tag, new_value, node=None, create=False):
     """Edit the value of one of the current node's tags.
 
     tag: the name of the tag to edit
     new_value: the new value to replace with
     node: [optional] node to use instead
+    create: [optional] create a new tag if the tag doesn't exist
     """
     from tagger.plugins import plugin
     if node is None:
@@ -157,8 +163,9 @@ def edit_tag_value(tag, new_value):
     try:
         node.tags[tag]
     except KeyError:
-        raise NodeError('tag \'{}\' not found'.format(tag))
-    new_tag(tag, new_value)
+        if not create:
+            raise NodeError('tag \'{}\' not found'.format(tag))
+    new_tag(tag, new_value, node)
 
 
 def new_tag(tag, value=None, node=None):
@@ -179,12 +186,13 @@ def new_tag(tag, value=None, node=None):
     node.tags[tag] = value
 
 
-def append_tag_value(tag, new_value, node=None):
+def append_tag_value(tag, new_value, node=None, create=False):
     """Add a value to one of the current node's tags.
 
     tag: the name of the tag to edit
     new_value: the new value to add
     node: [optional] node to use instead
+    create: [optional] create a new tag if the tag doesn't exist
     """
     from tagger.plugins import plugin
     if node is None:
@@ -192,6 +200,9 @@ def append_tag_value(tag, new_value, node=None):
     try:
         current = node.tags[tag]
     except KeyError:
+        if create:
+            new_tag(tag, new_value, node)
+            return
         raise NodeError('tag \'{}\' not found'.format(tag))
     if not plugin.tag_value_input_test(node, tag,
         node.tags[tag], new_value):
@@ -199,12 +210,14 @@ def append_tag_value(tag, new_value, node=None):
     new_value = plugin.tag_value_hook(
         node, tag, node.tags[tag], new_value
     )
-    if isinstance(current, list):
+    if new_value == None:
+        warning('cannot append None value')
+    elif isinstance(current, list) and new_value != None:
         current.append(new_value)
-    elif current != None or value != None:
+    elif not (current == None and new_value == None):
         node.tags[tag] = [current, new_value]
-    else:
-        raise APIWarning('duplicate None value')
+    elif current == None and new_value != None:
+        node.tags[tag] = new_value
 
 
 def remove_tag(tag, node=None):
@@ -229,15 +242,17 @@ def exit():
 def make_tree(source, overwrite=True):
     global tree
     if tree is not None and not overwrite:
-        raise APIWarning(
-            'tree already created; to overwrite, use api.make_tree(source, '
-            'overwrite=True)'
+        warning(
+            'tree already created; use api.make_tree(source, overwrite=True) '
+            'to overwrite and stop warning'
         )
     tree = Tree(source)
 
 
 def run():
     """Run the traversal command line interface."""
+    if tree is None:
+        raise NodeError('no data tree created; use api.make_tree(source)')
     while True:
         try:
             prompt()
@@ -262,7 +277,7 @@ def prompt():
     from tagger.plugins import plugin
     if tree is None:
         raise NodeError(
-            'no data tree created: use api.make_tree(source)'
+            'no data tree created; use api.make_tree(source)'
         )
     print(plugin.display_hook(tree.current_node))
     print(plugin.prompt_string(tree.current_node), end='')
@@ -312,7 +327,8 @@ def execute_command(command):
                     # given is itself None
             if fail or not was_none:
                 test = getattr(command, 'input_handler_'+name)
-                inputs[name] = test(value)
+                value = test(value)
+            inputs[name] = value
         except (NodeError, InputError) as e:
             raise InputError(str(e))
         except AttributeError:
@@ -389,6 +405,7 @@ class ReturnCommand(Command):
     defaults = {'depth': 1}
 
     def execute(self, depth):
+        print(depth)
         if not hasattr(tree.current_node, 'parent'):
             raise NodeError('current node is the root of the tree')
         for _ in range(depth):
@@ -489,6 +506,10 @@ class NewTagCommand(Command):
             node = tree.current_node.children[node-1]
         else:
             node = tree.current_node
+        if not value:
+            value = None
+        if len(value) == 1:
+            value = value[0]
         new_tag(name, value, node=node)
 
     def input_handler_name(self, i):
@@ -587,15 +608,8 @@ class SaveCommand(Command):
         self.file = open(file, 'w')
         try:
             self.write_data(tree.root.data)
-            author = tree.root.tags.pop('author')
-            if author:
-                self.write_data(author)
-            desc = tree.root.tags.pop('description')
-            if desc:
-                self.write_data(desc)
-            # write these 2 fields as data, not tags
-            for i in tree.root.tags.items():
-                self.write_line(self.format_tag(*i))
+            tags = tree.root.tags.copy()
+            self.write_tags(tags)
             for child in tree.root.children:
                 self.write_line('')
                 self.recursive_save(child)
@@ -611,8 +625,10 @@ class SaveCommand(Command):
             self.recursive_save(child)
         self.depth -= 1
 
-    def write_tags(self, tags, single=False):
+    def write_tags(self, tags):
         for k, v in tags.items():
+            if v is None:
+                v = ''
             if isinstance(v, list):
                 for i in v:
                     self.write_line(self.format_tag(k, i))
@@ -782,6 +798,13 @@ def resolve_child(indexes, node=None, offset=False):
             raise IndexError(str(i))  # don't allow accidental negative index
         node = node.children[i]
     return node
+
+
+def warning(message):
+    if WARNING:
+        raise APIWarning(message)
+    else:
+        print('API Warning:', message)
 
 
 class tests:

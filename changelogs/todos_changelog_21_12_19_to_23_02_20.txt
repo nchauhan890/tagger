@@ -1,4 +1,4 @@
-CHANGELOG:
+#CHANGELOG:
 [FORMAT: - dd/mm/yy: change + info]
 some entries marked with an asterisk may have changed
 
@@ -317,7 +317,29 @@ some entries marked with an asterisk may have changed
               or subclasses of Command are accepted
             - arguments will still be checked as they pass through
               api.execute_command(c)
-
+- 20/20/20: fixed problem in SaveCommand that would remove description and
+            author tags after saving due to use of dict.pop without making a
+            copy of the dict first
+- 20/02/20: parser now will not force the creation of empty 'description' and
+        **  'author' tags if not present in the data source
+            [CHANGED/DEPRECATED ON 23/02/20]
+- 23/02/20: added api.warning(message) function to create wrapper around
+            APIWarning class - don't use APIWarning on its own any more
+- 23/02/20: author and description fields in data source are not longer
+            required and must be written using tag syntax '`tag=value'
+- 23/02/20: changed invocation of tagger program from command line - now uses
+            argparse:
+            - python -m tagger -d DATA [-w]
+            - python -m tagger --data DATA --warnings
+            - the data argument is required and is the data to parse
+            - the warnings flag is to change treatment of API warnings:
+              - if true (present), API warnings will exit the command/function
+                in which they occured
+              - if false (absent), API warnings will be printed, but won't end
+                the current command
+            - if an API warning occurs whilst parsing the data source and
+              the warnings is true, then no data tree will be created and the
+              program will crash
 
 
 

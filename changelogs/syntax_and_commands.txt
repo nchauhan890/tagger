@@ -159,11 +159,8 @@ Data source:
   (backslash) for line continuation
 
 - the 1st line of the input data is a required field - it is the title
-  of the tree
-- the 2nd line is optional and is the author field
-- the 3rd line is optional and is the description field
+  of the tree - data of the root node
 - any other fields can be addded, but they must be written as a tag
   to give their name and value
-- all of the inital lines - title, [author, description], [other]* - will
-  be added as tags of the root node
+- all of the inital tags under the title will be tags of the root node
 - tag names will have whitespace removed and cannot have blank names
