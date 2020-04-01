@@ -1,6 +1,8 @@
 """API to perform base functions of data traversal."""
 
 import os
+import importlib
+from functools import wraps
 
 from tagger import structure
 from tagger import lexers
@@ -12,9 +14,50 @@ data_source = ''
 registry = {}
 command_queue = []  # the list of current commands that needs to be executed
 post_commands = []
-WARNING = False
 # commands that will be executed after all of the ones in command_queue have
 # finished (used for InCommand)
+_importing_commands = False
+WARNING = False
+_config = None
+unsaved_changes = False
+_hook_names = [
+    'pre_node_creation_hook',
+    'post_node_creation_hook',
+    'tag_name_hook',
+    'tag_name_input_test',
+    'tag_value_hook',
+    'tag_value_input_test',
+    'display_hook',
+    'prompt_string',
+    'inspect_commands',
+    'inspect_post_commands',
+]
+
+
+def initialise_plugins():
+    global _importing_commands
+    _importing_commands = True
+    for entry in os.scandir('tagger/plugins'):
+        if entry.is_file():
+            name = entry.name.rsplit('.', 1)[0]
+            if name != _config:
+                importlib.import_module('tagger.plugins.{}'.format(name))
+                print('Registered command file \'{}\'\n'.format(name))
+    _importing_commands = False
+    if _config:
+        importlib.import_module('tagger.plugins.{}'.format(_config))
+        print('Registered plugin file \'{}\'\n'.format(_config))
+
+
+def edits(func):
+    @wraps(func)
+    def wrapper(*args, **kw):
+        global unsaved_changes
+        r = func(*args, **kw)
+        unsaved_changes = True
+        return r
+    return wrapper
+
 
 
 class ProgramExit(Exception):
@@ -33,7 +76,7 @@ class CommandError(Exception):
     """Raised for any command-related error."""
 
 
-class APIWarning(Warning):
+class APIWarning(UserWarning):
     """Raised for API warnings."""
 
 
@@ -83,6 +126,7 @@ def return_from_node():
     return tree.traversal_numbers.pop()
 
 
+@edits
 def remove_node(index=None, node=None):
     """Remove the current node and return to parent.
 
@@ -105,6 +149,7 @@ def remove_node(index=None, node=None):
     return tree.current_node.children.pop(index)
 
 
+@edits
 def new_node(data, parent=None):
     """Create a new node.
 
@@ -112,18 +157,20 @@ def new_node(data, parent=None):
     parent: [optional] the parent of the new node
     return value: Node
     """
-    from tagger.plugins import plugin
     if parent is None:
         parent = tree.current_node
     data = plugin.pre_node_creation_hook(
         data, parent.depth + 1,
         parent.traversal_depth
     )
+    if not tests.not_whitespace(data):
+        raise NodeError('data cannot be empty')
     node = structure.Node(data, parent.depth + 1, parent)
     plugin.post_node_creation_hook(node)
     return node
 
 
+@edits
 def edit_tag_name(tag, new_tag, node=None, create=False):
     """Edit the name of one of the current node's tags.
 
@@ -134,7 +181,6 @@ def edit_tag_name(tag, new_tag, node=None, create=False):
     """
     if node is None:
         node = tree.current_node
-    from tagger.plugins import plugin
     try:
         value = tree.current_node.tags.pop(tag)
         # this will remove the current key-value pair
@@ -143,12 +189,15 @@ def edit_tag_name(tag, new_tag, node=None, create=False):
             new_tag(new_tag, None, node)
             return
         raise NodeError('tag \'{}\' not found'.format(tag))
-    if not plugin.tag_name_input_test(node, value, new_tag):
+    if not plugin.tag_name_input_test(node, tag, new_tag):
         raise NodeError('invalid tag name {}'.format(new_value))
-    value = plugin.tag_name_hook(node, tag, value, new_tag)
+    new_tag = plugin.tag_name_hook(node, tag, new_tag)
+    if not tests.not_whitespace(new_tag):
+        raise NodeError('tag name cannot be empty')
     node.tags[new_tag] = value
 
 
+@edits
 def edit_tag_value(tag, new_value, node=None, create=False):
     """Edit the value of one of the current node's tags.
 
@@ -157,7 +206,6 @@ def edit_tag_value(tag, new_value, node=None, create=False):
     node: [optional] node to use instead
     create: [optional] create a new tag if the tag doesn't exist
     """
-    from tagger.plugins import plugin
     if node is None:
         node = tree.current_node
     try:
@@ -168,6 +216,7 @@ def edit_tag_value(tag, new_value, node=None, create=False):
     new_tag(tag, new_value, node)
 
 
+@edits
 def new_tag(tag, value=None, node=None):
     """Create a new tag in the current node.
 
@@ -175,7 +224,6 @@ def new_tag(tag, value=None, node=None):
     value: [optional] the value to assign
     node: [optional] node to use instead
     """
-    from tagger.plugins import plugin
     if node is None:
         node = tree.current_node
     if not plugin.tag_value_input_test(node, tag, None, value):
@@ -183,9 +231,14 @@ def new_tag(tag, value=None, node=None):
     value = plugin.tag_value_hook(
         node, tag, None, value
     )
+    if not tests.not_whitespace(tag):
+        raise NodeError('tag name cannot be empty')
+    if tag in node.tags:
+        warning('tag already exists')
     node.tags[tag] = value
 
 
+@edits
 def append_tag_value(tag, new_value, node=None, create=False):
     """Add a value to one of the current node's tags.
 
@@ -194,7 +247,6 @@ def append_tag_value(tag, new_value, node=None, create=False):
     node: [optional] node to use instead
     create: [optional] create a new tag if the tag doesn't exist
     """
-    from tagger.plugins import plugin
     if node is None:
         node = tree.current_node
     try:
@@ -214,12 +266,15 @@ def append_tag_value(tag, new_value, node=None, create=False):
         warning('cannot append None value')
     elif isinstance(current, list) and new_value != None:
         current.append(new_value)
-    elif not (current == None and new_value == None):
+    elif current != None and new_value != None:
         node.tags[tag] = [current, new_value]
     elif current == None and new_value != None:
         node.tags[tag] = new_value
+    else:
+        raise NodeError('cannot append tag value')
 
 
+@edits
 def remove_tag(tag, node=None):
     """Remove a node's tag.
 
@@ -240,13 +295,15 @@ def exit():
 
 
 def make_tree(source, overwrite=True):
-    global tree
+    global tree, unsaved_changes
     if tree is not None and not overwrite:
         warning(
             'tree already created; use api.make_tree(source, overwrite=True) '
             'to overwrite and stop warning'
         )
     tree = Tree(source)
+    unsaved_changes = False
+    # the construction will call API functions so this must be reset to False
 
 
 def run():
@@ -274,7 +331,6 @@ def run():
 
 def prompt():
     """Read CLI input and execute given command(s)."""
-    from tagger.plugins import plugin
     if tree is None:
         raise NodeError(
             'no data tree created; use api.make_tree(source)'
@@ -284,12 +340,14 @@ def prompt():
     lexer = lexers.CLILexer(input())
     parser = parsers.CLIParser(lexer)
     commands = parser.generate_commands()
+    commands = plugin.inspect_commands(commands)
     print(commands, end='\n\n')
     command_queue.extend(commands)
     while command_queue:
         # use while loop, because commands may add to the queue themselves
         c = command_queue.pop(0)
         execute_command(c)
+    plugin.inspect_post_commands(post_commands)
     while post_commands:
         execute_command(post_commands.pop(0))
     print()
@@ -303,6 +361,7 @@ def execute_command(command):
         raise InputError(
             'no inputs given to command \'{}\''.format(command.ID)
         )
+    inputs = fill_missing_args(command, inputs)
     items = sorted(
         inputs.items(),
         key=lambda x: (getattr(
@@ -318,7 +377,7 @@ def execute_command(command):
             if value is None:
                 was_none = True
                 try:
-                    value = getattr(command, 'defaults', {})[name]
+                    value = command.defaults[name]
                 except KeyError:
                     fail = True
                 else:
@@ -328,6 +387,8 @@ def execute_command(command):
             if fail or not was_none:
                 test = getattr(command, 'input_handler_'+name)
                 value = test(value)
+                if value is None:
+                    print('input handler for parameter', name, 'returned None')
             inputs[name] = value
         except (NodeError, InputError) as e:
             raise InputError(str(e))
@@ -339,12 +400,14 @@ def execute_command(command):
     try:
         return command.execute(**inputs)
     except TypeError as e:
+        raise
         if str(e).startswith('execute()'):
             # this should only match TypeError arising from the wrong
             # number of inputs given to the command
             raise InputError('not enough or too many inputs given to command '
                 '\'{}\''.format(command.ID)
             )
+        raise
 
 class Command:
     """Produced by CLI parser to represent given traversal commands."""
@@ -362,379 +425,20 @@ class Command:
             self.ID
         ))
 
-    @staticmethod
-    def disabled():
+    def disabled(self):
         return False
 
     def __init_subclass__(cls):
-        print('Registered \'{}\' command'.format(cls.ID))
+        if not cls.__doc__ and not cls.description:
+            cls.description = ''
+        elif not cls.description and cls.__doc__:
+            cls.description = cls.__doc__
         registry[' '.join(cls.ID.split())] = cls
+        print('Registered command \'{}\''.format(cls.ID))
 
     signature = ''
-
-
-class EnterCommand(Command):
-
-    ID = 'enter'
-    signature = 'NUMBER=index NUMBER=extra*'
-
-    def execute(self, index, extra):
-        extra = extra or []
-        inputs = [index, *extra]
-        for i in inputs:
-            enter_node(i - 1)  # node 1 is index 0
-
-    def input_handler_index(self, i):
-        num = len(tree.current_node.children)
-        test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            tests.is_valid_child_index(tree.current_node)
-        )
-        test_input(num, 'current node does not have any entries', bool)
-        return int(i)
-
-    def input_handler_extra(self, inputs):
-        return [self.input_handler_index(i) for i in inputs]
-
-
-class ReturnCommand(Command):
-
-    ID = 'return'
-    signature = 'NUMBER=depth?'
-    defaults = {'depth': 1}
-
-    def execute(self, depth):
-        print(depth)
-        if not hasattr(tree.current_node, 'parent'):
-            raise NodeError('current node is the root of the tree')
-        for _ in range(depth):
-            return_from_node()
-
-    def input_handler_depth(self, i):
-        test_input(i, 'number of depths to return must be greater than 0',
-                   tests.greater_than(0))
-        num = len(tree.traversal_numbers)
-        test_input(i, 'number of depths to return must not exceed {}'
-                   .format(num), tests.less_equal(num))
-        return i
-
-
-class RemoveCommand(Command):
-
-    ID = 'remove'
-    signature = 'NUMBER=index?'
-    defaults = {'index': None}
-
-    def execute(self, index):
-        if index is None:
-            if not hasattr(tree.current_node, 'parent'):
-                raise NodeError('current node is the root of the tree '
-                                'and cannot be removed')
-            remove_node()
-            return
-        remove_node(index - 1)  # node 1 is index 0
-
-    def input_handler_index(self, i):
-        test_input(i, 'index of node must be an integer', tests.integer)
-        i = int(i)
-        test_input(i, 'index of node must be greater than 0',
-                   tests.greater_than(0))
-        num = len(tree.current_node.children)
-        test_input(num, 'current node does not have any entries', bool)
-        test_input(i, 'index of node must not exceed {}'.format(num),
-                   tests.less_equal(num))
-        return i
-
-
-class NewDataCommand(Command):
-
-    ID = 'new data'
-    signature = 'at NUMBER=position [in NUMBER=node] STRING=data'
-    defaults = {'node': None}
-
-    def execute(self, position, data, node):
-        if node is not None:
-            node = tree.current_node.children[node-1]
-        else:
-            node = tree.current_node
-        node.children.insert(position-1, new_node(data, parent=node))
-
-    def input_handler_position(self, i):
-        if self.inputs.get('node', None) is None:
-            node = tree.current_node
-        else:
-            # in the child node (argument 'in')
-            node = tree.current_node.children[self.inputs['node']]
-        num = len(node.children) + 1
-        # +1 because the extra one is the last non-existent index that
-        # may be created
-        test_input(
-            i, ['position must be an integer', 'position must be greater '
-                'than 0', 'position must not exceed {}'.format(num)],
-            tests.is_valid_child_index(node)
-        )
-        return int(i)
-
-    def input_handler_node(self, i):
-        num = len(tree.current_node.children)
-        test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            tests.is_valid_child_index(tree.current_node)
-        )
-        return int(i)
-
-    def input_handler_data(self, i):
-        test_input(i, 'data cannot be empty', lambda x: not str.isspace(x),
-                   bool)
-        return i
-
-    input_handler_node.priority = 1
-    input_handler_data.priority = 2
-
-
-class NewTagCommand(Command):
-
-    ID = 'new tag'
-    signature = '[in NUMBER=node] STRING=name STRING=value*'
-    defaults = {'node': None}
-
-    def execute(self, name, node, value):
-        # value will be a list
-        if node is not None:
-            node = tree.current_node.children[node-1]
-        else:
-            node = tree.current_node
-        if not value:
-            value = None
-        if len(value) == 1:
-            value = value[0]
-        new_tag(name, value, node=node)
-
-    def input_handler_name(self, i):
-        test_input(i, 'name cannot be empty', tests.not_whitespace, bool)
-        return i
-
-    def input_handler_node(self, i):
-        num = len(tree.current_node.children)
-        test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            tests.is_valid_child_index(tree.current_node)
-        )
-        return int(i)
-
-
-class RemoveTagCommand(Command):
-
-    ID = 'remove tag'
-    signature = '[in NUMBER=node] STRING=tag'
-    defaults = {'node': None}
-
-    def execute(self, tag, node):
-        if node is None:
-            node = tree.current_node
-        else:
-            node = tree.current_node.children[node]
-        remove_tag(tag, node=node)
-
-    def input_handler_node(self, i):
-        num = len(tree.current_node.children)
-        test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            tests.is_valid_child_index(tree.current_node)
-        )
-        return int(i)
-
-
-class EditDataCommand(Command):
-
-    ID = 'edit data'
-    signature = '[of NUMBER=node] STRING=data'
-
-
-class EditTagNameCommand(Command):
-
-    ID = 'edit tag name'
-    signature = '[of NUMBER=node] STRING=tag STRING=new'
-
-
-class EditTagValueCommand(Command):
-
-    ID = 'edit tag value'
-    signature = '[of NUMBER=node] STRING=tag STRING=value*'
-
-
-class AppendTagValueCommand(Command):
-
-    ID = 'append tag value'
-    signature = '[of NUMBER=node] STRING=tag STRING=value'
-
-
-class ExitCommand(Command):
-
-    ID = 'exit'
-
-    def execute(self):
-        print('Exiting...')
-        exit()
-
-
-class InCommand(Command):
-
-    ID = 'in'
-    signature = 'NUMBER=node'
-
-    def execute(self, node):
-        c = EnterCommand()
-        c.inputs = fill_missing_args(c, {'index': node})
-        command_queue.insert(0, c)  # the next one to be executed
-        r = ReturnCommand()
-        r.inputs = fill_missing_args(r, {'depth': 1})
-        post_commands.append(r)
-
-
-class SaveCommand(Command):
-
-    ID = 'save'
-
-    def execute(self):
-        cwd = os.path.split(data_source)[0]
-        file = os.path.join(cwd, 'output.txt')
-        self.depth = 0
-
-        self.file = open(file, 'w')
-        try:
-            self.write_data(tree.root.data)
-            tags = tree.root.tags.copy()
-            self.write_tags(tags)
-            for child in tree.root.children:
-                self.write_line('')
-                self.recursive_save(child)
-        finally:
-            self.file.close()
-        print('Saved to {}'.format(file))
-
-    def recursive_save(self, node):
-        self.depth += 1
-        self.write_data(node.data)
-        self.write_tags(node.tags)
-        for child in node.children:
-            self.recursive_save(child)
-        self.depth -= 1
-
-    def write_tags(self, tags):
-        for k, v in tags.items():
-            if v is None:
-                v = ''
-            if isinstance(v, list):
-                for i in v:
-                    self.write_line(self.format_tag(k, i))
-                    # separate 'list' tags into multiple
-            else:
-                self.write_line(self.format_tag(k, v))
-
-    def write_data(self, data):
-        self.write_line(self.format_data(data))
-
-    def format_data(self, line):
-        line = line.replace('*', '\\*')
-        line = line.replace('`', '\\`')
-        line = line.replace('\\', '\\\\')
-        return '{}{}'.format('*' * self.depth, line)
-
-    def format_tag(self, tag, value=''):
-        tag = tag.replace('*', '\\*')
-        tag = tag.replace('`', '\\`')
-        tag = tag.replace('=','\\=')
-        tag = tag.replace('\\', '\\\\')
-        if value:
-            return '{}`{}={}'.format('*' * self.depth, tag, value)
-        return '{}`{}'.format('*' * self.depth, tag)
-
-    def write_line(self, line):
-        self.file.write('{}\n'.format(line))
-
-
-class HelpCommand(Command):
-
-    ID = 'help'
-
-    @staticmethod
-    def signature():
-        r = '[{}]'.format('|'.join('<{}>'.format(k) for k in registry.keys()))
-        return r
-
-    def execute(self, **kw):
-        for k, v in kw.items():
-            if v:
-                command = ' '.join(k.split('_'))
-                break
-        else:
-            command = None
-        if command is None:
-            print('Registered commands:')
-            disabled = []
-            for k, v in registry.items():
-                if v.disabled():
-                    disabled.append(k)
-                else:
-                    print('-', k)
-            if not disabled:
-                return
-            print('\nCommands disabled in current context:')
-            for k in disabled:
-                print('-', k)
-        else:
-            c = resolve(command)
-            # don't catch error, it will have the correct message already
-            signature = resolve_signature(c)
-            print('Help on command \'{}\':\n'.format(c.ID))
-            if signature:
-                print('- signature:', ' '.join(signature.split()))
-                # this removes double
-            _lexer = lexers.SignatureLexer(signature)
-            _parser = parsers.SignatureParser(_lexer, c.ID)
-            _sig_parts = _parser.make_signature()
-            print('- syntax:', c.ID, ' '.join([
-                self.signature_syntax(s) for s in _sig_parts
-            ]))
-            if c.disabled():
-                print('- disabled in current context')
-
-    def signature_syntax(self, signature):
-        if isinstance(signature, structure.OptionalPhrase):
-            return '[{}]'.format(' '.join([
-                self.signature_syntax(x) for x in signature.parts
-            ]))
-        if isinstance(signature, structure.Phrase):
-            if len(signature.parts) == 1:
-                return self.signature_syntax(parts[0])
-            return '({})'.format(' '.join([
-                self.signature_syntax(x) for x in signature.parts
-            ]))
-        if isinstance(signature, structure.End):
-            return ''
-        if isinstance(signature, structure.Optional):
-            return '{}?'.format(self.signature_syntax(signature.pattern))
-        if isinstance(signature, structure.Variable):
-            return '{}*'.format(self.signature_syntax(signature.pattern))
-        if isinstance(signature, structure.Keyword):
-            return signature.value
-        if isinstance(signature, structure.Flag):
-            return '<{}>'.format(signature.value)
-        if isinstance(signature, structure.Or):
-            return '({})'.format(' | '.join([
-                self.signature_syntax(x) for x in signature.parts
-            ]))
-        if isinstance(signature, structure.Input):
-            if signature.type == lexers.NUMBER:
-                return 'n'
-            if signature.type == lexers.STRING:
-                return '\'{}\''.format(signature.argument)
-        return str(signature.value)
+    description = ''
+    defaults = {}
 
 
 def resolve(name):
@@ -744,12 +448,20 @@ def resolve(name):
     return value: Command subclass
     """
     try:
-        return registry[name]
+        return registry[name]()
     except KeyError:
         raise CommandError('unknown command \'{}\''.format(name))
 
 
+def is_disabled(command):
+    if isinstance(command, type):
+        command = command()  # instantiate if subclass passed
+    return command.disabled()
+
+
 def resolve_signature(command):
+    if isinstance(command, type):
+        command = command()  # instantiate if subclass passed
     try:
         return command.signature()
     except TypeError:
@@ -757,16 +469,17 @@ def resolve_signature(command):
 
 
 def fill_missing_args(command, args):
+    inputs = command.defaults.copy()
     _lex = lexers.SignatureLexer(resolve_signature(command))
     _par = parsers.SignatureParser(_lex, command.ID)
-    inputs = (parsers.CLIParser(lexers.CLILexer(''))
+    inputs.update(parsers.CLIParser(lexers.CLILexer(''))
              .scan_for_inputs_or_flags(_par.make_signature()))
     inputs.update(args)
     return inputs
 
 
 def manual_execute(command, args):
-    if issubclass(command, Command):
+    if isinstance(command, type):
         command = command()
     elif not isinstance(command, Command):  # should be a string
         command = resolve(command)
@@ -789,14 +502,19 @@ def test_input(input, message, *tests):
 
 
 def resolve_child(indexes, node=None, offset=False):
-    if offest:
+    if offset:  # starting from 1
         indexes = [i-1 for i in indexes]
     if node is None:
         node = tree.current_node
     for i in indexes:
-        if i < 0:
-            raise IndexError(str(i))  # don't allow accidental negative index
-        node = node.children[i]
+        try:
+            if i < 0:  # don't allow accidental negative index
+                raise IndexError()
+            node = node.children[i]
+        except IndexError:
+            if offset:
+                i += 1
+            raise IndexError(str(i))
     return node
 
 
@@ -834,7 +552,9 @@ class tests:
     @staticmethod
     def not_whitespace(input):
         """Test if input contains characters other than whitespace."""
-        return not str(input).isspace()
+        if not isinstance(input, str):
+            return False
+        return not input.isspace()
 
     @staticmethod
     def in_range(x, y):
@@ -872,10 +592,13 @@ class tests:
         return less_eq
 
     @staticmethod
-    def is_valid_child_index(node, true_index=False):
-        """Return function to test if x is a valid index of child node."""
+    def is_valid_child_index(num, true_index=False):
+        """Return function to test if 0 < x <= num."""
+        if isinstance(num, (structure.Node, structure.Root)):
+            num = len(num.children)
         def valid_child_index(x):
-            num, zero = len(node.children), 0
+            nonlocal num
+            zero = 0
             if true_index:
                 num -= 1
                 zero = -1
@@ -887,3 +610,27 @@ class tests:
                 return 2
             return True
         return valid_child_index
+
+
+class Hooks:
+    def __init_subclass__(cls):
+        if not _importing_commands:
+            # don't import hooks except from plugin
+            for h in _hook_names:
+                if hasattr(cls, h):
+                    hooks[h] = getattr(cls, h)
+                    print('Registered hook \'{}\''.format(h))
+
+
+class HookDispatcher:
+    def __getattribute__(self, k):
+        def wrapper(*args, **kw):
+            return hooks[k](*args, **kw)
+        return wrapper
+
+
+hooks = dict.fromkeys(_hook_names)
+importlib.import_module('tagger.plugin')
+print('Registered default plugin hooks')
+print('Registered default commands\n')
+plugin = HookDispatcher()

@@ -1,4 +1,4 @@
-#CHANGELOG:
+CHANGELOG:
 [FORMAT: - dd/mm/yy: change + info]
 some entries marked with an asterisk may have changed
 
@@ -76,7 +76,7 @@ some entries marked with an asterisk may have changed
                 [DEPRECATED ON 22/01/20]
 - 17/01/20: added CLIParser.eat_keyword(kw) to eat TEXT tokens, but also
         **  checking that token.value == kw
-            [TEXT changed to KEYWORD on 26/01/20]
+            1TEXT changed to KEYWORD on 26/01/20]
 - 17/01/20: parser now will resolve the name of a keyword to a custom command
             from the plugin, if defined
         **  - custom command must subclass api.CustomCommand
@@ -207,7 +207,8 @@ some entries marked with an asterisk may have changed
 - 07/02/20: parsers.construct_tree now also calls plugin hooks for tag names
             and values
 - 07/02/20: added class AppendTagValueCommand (not implemented) to add to a tag
-            that is/will become a list
+        **  that is/will become a list
+            [IMPLEMENTED ON 27/02/20]
 - 07/02/20: added api.Tree.new_tag and api.Tree.append_tag_value
 - 07/02/20: implemented 'new tag [in n] 'name' 'value?''
 - 07/02/20: added tests.is_valid_child_index(node, true_index=False) to check
@@ -317,7 +318,7 @@ some entries marked with an asterisk may have changed
               or subclasses of Command are accepted
             - arguments will still be checked as they pass through
               api.execute_command(c)
-- 20/20/20: fixed problem in SaveCommand that would remove description and
+- 20/02/20: fixed problem in SaveCommand that would remove description and
             author tags after saving due to use of dict.pop without making a
             copy of the dict first
 - 20/02/20: parser now will not force the creation of empty 'description' and
@@ -340,7 +341,87 @@ some entries marked with an asterisk may have changed
             - if an API warning occurs whilst parsing the data source and
               the warnings is true, then no data tree will be created and the
               program will crash
+- 25/02/20: implemented 'append tag value' command
+- 25/02/20: added prompt at the end of ExitCommand.execute that asks if the
+            user has saved, to try and prevent accidental loss of modifications
+- 25/02/20: 'new data' command now has the phrase 'at n' as an optional part;
+            by default the position is set internally as -1 indicating the end
+            of the current list of child nodes
+- 25/02/20: all API hooks must now be put into a class that subclasses
+            api.Hooks
+            - added api.Hooks class to allow this, with an __init_subclass__
+              method
+            - added api.HookDispatcher which makes the variable api.plugin
+              behave as if it were a single imported file, but dispatches
+              attribute accesses to the registry of API hooks
+            - this adds support for multiple plugins at once
+- 25/02/20: api.tests.is_valid_child_index(n) now accepts a number as the
+            input, as well as a node
+            - the basis of the test is 0 < x <= num or, if true_index is true:
+              0 <= x < num
+- 27/02/20: to specify which plugin to use for a certain data source, the tag
+            '`config=plugin' can be added as a tag of the root node which, when
+            parsed, will initialise the given plugin file:
+            - the plugin file will be checked for an api.Hooks subclass and
+              these hooks will be registered, overwriting the default ones
+              from plugin.py (they don't all have to be overwritten)
+            - any other commands defined in the plugin file will be registered
+            - any commands in other plugin files will be registerd, but any
+              other api.Hooks subclasses will be ignored
+            - if a tag appears before the config tag is parsed, it will NOT
+              pass through the plugin hooks
+- 27/02/20: moved tagger/plugins/plugin.py to tagger/plugin.py for use as the
+            default/fallback plugin hooks
+- 27/02/20: added example.py and default.py to contain the respective commands
+- 27/02/20: the attribute Command.__doc__ or Command.description will be used
+            by the help command as an additional piece of information
+- 27/02/20: SaveCommand now has updated syntax 'save [as 'name']'
+            - will save as the given name in the directory of the data source
+            - a prompt for overwrite will display if the given name already
+              exists
+- 02/03/20: Command.disabled() now now longer needs to be a staticmethod as
+            api.resolve(c) returns a Command instance, not subclass and new
+            api.is_disabled(command) will correctly handle both Command
+            subclasses and instances
+            - this also applies to dynamic Command.signature() where present
+- 02/03/20: certain commands that have a parameter 'node' that indicates a
+            child node of the current now use a dynamic signature to remove
+            this optional argument when the node has no children
+- 02/03/20: InCommand now accepts multiple nodes (syntax: 'in n n*') like
+            EnterCommand
+- 03/03/20: added plugin hook inspect_commands(commands) where commands is a
+            list of Command instances that are about to be executed
+            - hook should return a list of commands
+- 03/03/20: added plugin hook inspect_post_commands(commands) which functions
+            the same as inspect_commands, but is called with api.post_commands
+            after the initial commands in the normal queue have all been
+            executed
+            - hook should return a list of commands
+- 04/03/20: numbers in CLI can now be negative, but only a single negative
+            sign is allowed DIRECTLY in front of digits; that is, '-1' is
+            allowed, but '- 1' and '--1' are invalid
+- 04/03/20: added 'what' command in default.py which can help give the user
+            info on current data - 1 of 6 things can be written as keywords
+            after the command name:
+            - 'what depth': display current depth
+            - 'what title': display title of data tree
+            - 'what position': display position of current node in its parent's
+                               list of children
+            - 'what plugin': display name of plugin file, if any
+            - 'what commands': display help on ALL commands
+            - 'what saved': displays whether the tree is saved or not
+- 04/03/20: added api.edits(f) which should be used as a decorator on any
+            function that may modify the data tree - this will edit the flag
+            api.unsaved_changes which indicates the data tree is not saved
+- 04/03/20: commands 'exit', 'save' and 'help' are now directly written in
+            plugin.py and will come as pre-written commands
+- 04/03/20: added tagger.parsers.ParserBase._previous attribute which will hold
+            the token that has just been consumed (by ParserBase.eat)
+- 04/03/20: 'save' command now has added syntax: 'save [as 'file'] and exit'
+            which will directly call ExitCommand
 
+[FINISHED ON 01/04/20]
+[REMAINING TODOS MIGRATED TO todos_changelog_01_04_20]
 
 
 IN PROGRESS:
@@ -348,20 +429,15 @@ implementing default commands - ones left to do:
 - edit data
 - edit tag name
 - edit tag value
-- append tag value ** mark change on changelog from 07/02
 
 
 NEXT UP:
-
-add verbose option
-in api.manual_execute, add options to queue the command in command_queue or
-post_commands (with index)
+- add backward references or absolute references from root
+- in api.manual_execute, add options to queue the command in command_queue or
+  post_commands (with index)
 - add ALL the plugin hooks for EACH API base function SEPRATELY
 - dot parsing in command signatures (e.g. 2.1.3) and check if node.node.node is
   a valid or child that exists
-- stop importing the plugin and make all commands/hooks register to api
-  (by putting hooks in a class)
-
 
 TODO:
 
@@ -373,19 +449,14 @@ TODO:
   - commands will need to have IDs
   - this could allow plugins to interact
 
-- add 'do you want to save?' option before exiting
-  (add back input_handler function and pre-written functions like
-   get_yes_or_no from the unseen pre-pre-release version)
+add back input_handler function and pre-written functions like
+get_yes_or_no from the unseen pre-pre-release version
 
 - add environment variables $depth $data (perhaps?)
 
 
 [Commands-related things]
 - add float/drop/copy commands
-- add save/flush command
-- add dynamic listings to only show some options ***
-  (e.g. don't show 'exit' for anything other than top-level... possibly)
-- add option to list tags
 - add search option
 
 - make the 'in' command safe for use with any command that may call
@@ -393,13 +464,9 @@ TODO:
 - add search finally
 - consider having an undo option
 
-- add a way to register new commands to the 'master' which delegates calls
-  (support here for multiple plugins at once)
 - make a general command queue object to hold both command queue lists as one
   and know where new commands should be added
 
 
 [Input-related things]
-
-
-OTHER:
+None at the moment

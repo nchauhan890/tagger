@@ -220,6 +220,9 @@ class CLILexer(LexerBase):
             return Token(EOF, None)
         if char in digits:
             return Token(NUMBER, self.collect_number())
+        elif char == '-' and self.next() in digits and self.next():
+            self.advance()  # skip -, but make the result negative
+            return Token(NUMBER, -self.collect_number())
         elif char in ascii_letters + '_':
             return self.collect_text()
         elif char == '?':

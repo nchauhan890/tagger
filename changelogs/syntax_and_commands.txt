@@ -71,6 +71,10 @@ Defining custom commands:
 - [optional] add the classmethod/staticmethod command.disabled(cls?) which
   can return True to indicate the command is disabled in the current context
   and cannot be parsed (but still manually executed)
+- [optional] add the attribute Command.description which will be used as
+  additional information by the help command
+- [optional, instead of the previous] add a docstring to the command to have
+  the same function as Command.description
 
 Writing command signatures:
 - signatures define how custom commands and their inputs are parsed
@@ -128,6 +132,7 @@ Plugin hooks:
  so that plugins can convert data to correct format e.g. dates/numbers)
 - see plugin.py for more detailed descriptions of each hook and
   examples of some in use with the sample data
+- all hook functions should go into a class that subclasses api.Hooks
 
 pre_node_creation_hook(data, depth, parents) -> value for node
 - edit data before creating node
@@ -160,6 +165,8 @@ Data source:
 
 - the 1st line of the input data is a required field - it is the title
   of the tree - data of the root node
+- the 2nd line of the input data is a required field - it is the name of
+  the plugin python file to use (in the plugins/ folder)
 - any other fields can be addded, but they must be written as a tag
   to give their name and value
 - all of the inital tags under the title will be tags of the root node

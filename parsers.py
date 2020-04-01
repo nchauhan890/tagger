@@ -22,6 +22,7 @@ class ParserBase:
         self.lexer = lexer
         self.current_token = self.lexer.generate_token()
         self.buffer = []
+        self._previous = None  # the token just consumed
 
     def eat(self, type, extra=''):
         if self.current_token.type == type:
@@ -38,6 +39,7 @@ class ParserBase:
         return value
 
     def advance_token(self):
+        self._previous = self.current_token
         if self.buffer:
             self.current_token = self.buffer.pop(0)
         else:
@@ -120,7 +122,7 @@ class CLIParser(ParserBase):
         current_reg = {}
         for k, v in api.registry.items():
             current_reg[tuple(k.split())] = v
-        if current == EOF:
+        if current.type == EOF:
             return
 
         def error(t):
@@ -158,7 +160,10 @@ class CLIParser(ParserBase):
         if current.type == KEYWORD:
             c = self.eat(KEYWORD)
             if c not in first_level_key(current_reg):
-                self.raise_error('unknown command \'{}\''.format(c))
+                self.raise_error(
+                    'unknown command \'{}\''.format(c),
+                    token=current
+                )
             current_reg = advance_registry_level(current_reg, c)
             command = loop_keyword(self, current_reg)
             command = command()  # instantiate the command class
@@ -497,7 +502,7 @@ class Buffer:
 
 
 def _recursive_construct(parser, _depth, _parent, _top_level=False):
-    from tagger.plugins import plugin
+    plugin = api.plugin
     lookahead = parser.lookahead(1)
     children = []
     parent_list = _parent.parent_list
@@ -553,9 +558,17 @@ def construct_tree(parser):
     parser = Buffer(parser)
     title = next(parser).data
     root = structure.Root(title)
+    initialised = False
     while isinstance(parser.lookahead(1), structure.TagPattern):
         pattern = next(parser)
         api.append_tag_value(pattern.data, pattern.value, root, create=True)
+        if pattern.data == 'config':
+            api._config = pattern.value
+            api.initialise_plugins()
+            initialised = True
+    if not initialised:
+        api.initialise_plugins()  # no config tag found
+
     root.children.extend(_recursive_construct(
         parser, _depth=0, _parent=root, _top_level=True
     ))

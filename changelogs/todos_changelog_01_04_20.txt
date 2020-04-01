@@ -1,0 +1,66 @@
+CHANGELOG:
+
+Format:
+- dd/mm/yy: change + info
+            - extra info on indented line
+
+Some entries marked with an asterisk may have changed:
+[CHANGED ON dd/mm/yy]     -> a feature whose behaviour/implementation has
+                              changed
+[DEPRECATED ON dd/mm/yy]  -> a feature that has been removed
+[IMPLEMENTED ON dd/mm/yy] -> a feature that was mentioned or whose framework
+                              was added and has now been written
+[ADDED TO ON dd/mm/yy]    -> a feature that has been added to
+
+(other specific changes may be written in square brackets too if a certain
+ reference in an older entry is still valid but something other than
+ the feature itself has changed e.g. a renamed keyword)
+
+
+IN PROGRESS:
+implementing default commands - ones left to do:
+- edit data
+- edit tag name
+- edit tag value
+
+
+NEXT UP:
+- add backward references or absolute references from root
+- in api.manual_execute, add options to queue the command in command_queue or
+  post_commands (with index)
+- add ALL the plugin hooks for EACH API base function SEPRATELY
+- dot parsing in command signatures (e.g. 2.1.3) and check if node.node.node is
+  a valid or child that exists
+
+
+TODOS:
+
+[API and plugins]
+
+- consider adding a 'master' command execution hook so that a plugin can 
+  intercept command calls and delegate calls to their custom hooks instead
+  of hard-coded hook names (for default commands)
+  - commands will need to have IDs
+  - this could allow plugins to interact
+
+add back input_handler function and pre-written functions like
+get_yes_or_no from the unseen pre-pre-release version
+
+- add environment variables $depth $data (perhaps?)
+
+
+[Commands-related things]
+- add float/drop/copy commands
+- add search option
+
+- make the 'in' command safe for use with any command that may call
+  api.Tree.return_from_node
+- add search finally
+- consider having an undo option
+
+- make a general command queue object to hold both command queue lists as one
+  and know where new commands should be added
+
+
+[Input-related things]
+None at the moment
