@@ -25,7 +25,7 @@ class EnterCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-            api.tests.is_valid_child_index(num)
+           *api.tests.is_valid_child_index(num)
         )
         api.test_input(num, 'current node does not have any entries', bool)
         return int(i)
@@ -135,7 +135,7 @@ class NewDataCommand(api.Command):
         api.test_input(
             i, ['position must be an integer', 'position must be greater '
                 'than 0', 'position must not exceed {}'.format(num)],
-            api.tests.is_valid_child_index(num)
+           *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -144,7 +144,7 @@ class NewDataCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-            api.tests.is_valid_child_index(num)
+           *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -187,10 +187,11 @@ class NewTagCommand(api.Command):
 
     def input_handler_node(self, i):
         num = len(api.tree.current_node.children)
+        api.test_input(num, 'current node does not have any entries', bool)
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-            api.tests.is_valid_child_index(num)
+           *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -215,10 +216,11 @@ class RemoveTagCommand(api.Command):
 
     def input_handler_node(self, i):
         num = len(api.tree.current_node.children)
+        api.test_input(num, 'current node does not have any entries', bool)
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-            api.tests.is_valid_child_index(num)
+           *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -233,6 +235,28 @@ class EditDataCommand(api.Command):
         if api.tree.current_node.children:
             return '[of NUMBER=node] STRING=data'
         return 'STRING=data'
+
+    def execute(self, data, node):
+        if node is None:
+            node = api.tree.current_node
+        else:
+            node = api.tree.current_node.children[node-1]
+        api.edit_data(data, node=node)
+
+    def input_handler_data(self, i):
+        api.test_input(i, 'data cannot be empty', api.tests.not_whitespace,
+                   bool)
+        return i
+
+    def input_handler_node(self, i):
+        num = len(api.tree.current_node.children)
+        api.test_input(num, 'current node does not have any entries', bool)
+        api.test_input(
+            i, ['node index must be an integer', 'node index must be greater '
+                'than 0', 'node index must not exceed {}'.format(num)],
+           *api.tests.is_valid_child_index(num)
+        )
+        return int(i)
 
 
 class EditTagNameCommand(api.Command):
@@ -285,7 +309,7 @@ class AppendTagValueCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-            api.tests.is_valid_child_index(num)
+           *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -313,7 +337,7 @@ class InCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-            api.tests.is_valid_child_index(num)
+           *api.tests.is_valid_child_index(num)
         )
         api.test_input(num, 'current node does not have any entries', bool)
         return int(i)
@@ -367,8 +391,13 @@ class WhatCommand(api.Command):
                     ))
                     break
         elif plugin:
-            if api._config:
-                print('The plugin file is called \'{}\''.format(api._config))
+            if api.log.plugin_file:
+                print('The plugin file is called \'{}\''
+                      .format(api.log.plugin_file))
+                if api.log.plugin_loaded:
+                    print('The plugin file was successfully loaded')
+                else:
+                    print('The plugin file was not loaded successfully')
             else:
                 print('There is no plugin file loaded')
         elif commands:
@@ -376,12 +405,14 @@ class WhatCommand(api.Command):
             for i, name in enumerate(api.registry.keys()):
                 print()
                 if i % 4 == 3:
-                    input('press enter to continue')
+                    r = input('press enter to continue or type \'q\' to stop ')
+                    if r.strip() == 'q':
+                        break
                 kw = {'_'.join(name.split()): True}
-                api.manual_execute(HelpCommand, kw)
+                api.manual_execute(api.resolve_command('help'), kw)
         elif saved:
             print('There are {}unsaved changes'.format(
-                'no ' if not api.unsaved_changes else ''
+                'no ' if not api.log.unsaved_changes else ''
             ))
         else:
             raise api.InputError('no argument given')

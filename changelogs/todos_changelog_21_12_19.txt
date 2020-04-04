@@ -201,7 +201,8 @@ some entries marked with an asterisk may have changed
 - 06/02/20: when duplicate tag names are found in the data source, instead of
             being overwritten, they are accumulated into a list
 - 06/02/20: added 'save' command which, at the moment, will save the current
-            changes to 'output.txt' in the directory of the data source file
+        **  changes to 'output.txt' in the directory of the data source file7
+            [ADDED TO ON 27/02/20]
 - 07/02/20: at startup, the parser will use post_node_creation hook, AFTER the
             the node has had its tags added
 - 07/02/20: parsers.construct_tree now also calls plugin hooks for tag names
@@ -351,10 +352,11 @@ some entries marked with an asterisk may have changed
             api.Hooks
             - added api.Hooks class to allow this, with an __init_subclass__
               method
-            - added api.HookDispatcher which makes the variable api.plugin
+        **  - added api.HookDispatcher which makes the variable api.plugin
               behave as if it were a single imported file, but dispatches
               attribute accesses to the registry of API hooks
             - this adds support for multiple plugins at once
+              [RENAMED HookDispatcher to NameDispatcher on 02/04/20]
 - 25/02/20: api.tests.is_valid_child_index(n) now accepts a number as the
             input, as well as a node
             - the basis of the test is 0 < x <= num or, if true_index is true:
@@ -376,14 +378,16 @@ some entries marked with an asterisk may have changed
 - 27/02/20: the attribute Command.__doc__ or Command.description will be used
             by the help command as an additional piece of information
 - 27/02/20: SaveCommand now has updated syntax 'save [as 'name']'
-            - will save as the given name in the directory of the data source
+        **  - will save as the given name in the directory of the data source
             - a prompt for overwrite will display if the given name already
               exists
+            [ADDED TO ON 04/03/20]
 - 02/03/20: Command.disabled() now now longer needs to be a staticmethod as
-            api.resolve(c) returns a Command instance, not subclass and new
+        **  api.resolve(c) returns a Command instance, not subclass and new
             api.is_disabled(command) will correctly handle both Command
             subclasses and instances
             - this also applies to dynamic Command.signature() where present
+              [api.resolve RENAMED TO api.resolve_command]
 - 02/03/20: certain commands that have a parameter 'node' that indicates a
             child node of the current now use a dynamic signature to remove
             this optional argument when the node has no children
@@ -413,12 +417,18 @@ some entries marked with an asterisk may have changed
 - 04/03/20: added api.edits(f) which should be used as a decorator on any
             function that may modify the data tree - this will edit the flag
             api.unsaved_changes which indicates the data tree is not saved
+        **  - the base API functions e.g. api.edit_tag_name have this
+              decorator applied to them, so, naturally, any command which
+              calls one of these functions will update api.unsaved_changes
+              and therefore command itself doesn't need to have this decorator
+            [api.unsaved_changes MIGRATED TO api.log.unsaved_changes]
 - 04/03/20: commands 'exit', 'save' and 'help' are now directly written in
             plugin.py and will come as pre-written commands
 - 04/03/20: added tagger.parsers.ParserBase._previous attribute which will hold
             the token that has just been consumed (by ParserBase.eat)
 - 04/03/20: 'save' command now has added syntax: 'save [as 'file'] and exit'
-            which will directly call ExitCommand
+        **  which will directly call ExitCommand
+            [ADDED TO ON 04/04/20]
 
 [FINISHED ON 01/04/20]
 [REMAINING TODOS MIGRATED TO todos_changelog_01_04_20]

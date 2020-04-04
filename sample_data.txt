@@ -1,5 +1,5 @@
 An Inspector Calls
-`config=sample
+`config=sample.py
 `author=J. B. Priestley
 `description=A collection of quotes and analysis categorised by character
 `written=1944-45

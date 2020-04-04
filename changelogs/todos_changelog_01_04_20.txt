@@ -1,7 +1,7 @@
 CHANGELOG:
 
 Format:
-- dd/mm/yy: change + info
+- dd/mm/yy: change + brief info
             - extra info on indented line
 
 Some entries marked with an asterisk may have changed:
@@ -12,23 +12,138 @@ Some entries marked with an asterisk may have changed:
                               was added and has now been written
 [ADDED TO ON dd/mm/yy]    -> a feature that has been added to
 
-(other specific changes may be written in square brackets too if a certain
+(Other specific changes may be written in square brackets too, if a certain
  reference in an older entry is still valid but something other than
  the feature itself has changed e.g. a renamed keyword)
+
+The date on which a Github commit was made may also be present to easily see
+what's changed between releases
+
+- 01/04/20: fixed a bug with parsing commands (internal) where a flag
+            was parsed as a keyword
+            - bug discovered while using help command and error wrongly
+              occured
+            - fixed by moving flag parsing before keyword parsing in
+              CLIParser.part_matches_token
+- 01/04/20: api.new_tag now does call the 2 tag name plugin hooks as before
+            it didn't which was incorrect
+- 01/04/20: changed rendering of tags with multiple values in default display
+            hook:
+            - different items will render on new lines with commas at the end
+              of each
+            - the indent will match the end of the name of the tag + colon
+- 02/04/20: added '-p' ('--plugins') option to command line interface
+            (argparse) which can specify a specific directory in which to look
+            for plugins other than in tagger/plugins
+- 02/04/20: the 'config' tag of the root of a data tree which specifies which
+            plugin file to use for hooks now requires that the file extension
+            of the plugin file is given
+- 02/04/20: changed + moved api.HookDispatcher to structure.NameDispatcher
+- 02/04/20: added api.log to hold data about events (moved existing api
+            variables into this too):
+            - this uses structure.NameDispatcher like api.plugin to convert
+              an attribute access into a dictionary lookup so all names can be
+              accessed e.g. with 'api.log.unsaved_changes'
+        **  - the names held in the log at the moment are:
+              - 'unsaved_changes' (migrated from api.unsaved_changes) which is
+                a bool indicating - to a certain extent - whether there are
+                modifications to the data tree that have not been saved
+                - this requires the use of api.edits as a decorator on
+                  functions that modify the data tree (ones in the api like
+                  api.new_tag already have this)
+                - this only relies on the fact that the SaveCommand will
+                  reset 'unsaved_changes' back to False
+                - this won't take into account the possibility that the file
+                  that had been saved to hasn't been deleted already
+                - this doesn't take into account that any other command/hook
+                  registered by other files may reset this value too
+              - 'plugin_file' (migrated from api._config) which is a string
+                containing the name of the plugin file given in the tag
+                'config' of the root of the data tree (or None if not
+                present)
+              - 'plugin_loaded' (new) which is a bool indicating whether the
+                plugin file was successfully loaded; it is True unless:
+                - accessed before api.initialise_plugins has run, or
+                - there is no plugin file given, or
+                - the given plugin file was not found in tagger/plugins, or
+                - (if an alternative plugins directory was given) the given
+                  plugin file was not found in the alternative directory
+              - 'warnings_on' (migrated from api.WARNING) which indicates
+                whether the option '--warnings' ('-w') was present at startup
+                - this value still could be changed (even temporarily) by
+                  another plugin file
+              - 'alternative_plugins_dir' which is a string of a path to the
+                directory in which to search for plugins other than in
+                tagger/plugins
+                - this value can be changed, however if plugins have already
+                  been initialised (api.initialise_plugins called), the
+                  plugins in the new directory won't be automatically
+                  registered unless api.initialise_plugins is called again
+              - 'data source' which is a string of the path to the input data
+            [ADDED TO ON 04/04/20]
+- 02/04/20: added API hook 'api.plugin.startup_hook' which will be called as
+            soon as the given plugin file ('config' tag of root) is loaded
+            successfully
+            - (api.initialise_plugin will call this hook)
+- 02/04/20: changed plugin initialisation order so that now the function
+            api.initialise_plugins will try to load the given plugin file
+            before trying to import other command files so that the hook
+            api.plugin.startup_hook is called as early as possible
+- 02/04/20: after startup, the number of overridden hooks and new commands
+            registered will be displayed
+- 03/04/20: api.resolve renamed to api.resolve_command to remove ambiguity
+            and so that its name matches similar command like
+            api.resolve_signature
+- 04/04/20: changed how api.test_input works with multiple error messages so
+            now the error message will be chosen based on which input test
+            function failed - functions should not return a number to
+            correspond with an index
+            - api.tests.is_valid_child_index changed so now it will return
+              a list of the 3 test functions it holds (it still accepts a
+              number or a Node object)
+            - the list returned should be unpacked into api.test_input:
+            - 'api.test_input(i, [msgs], *api.is_valid_child_index(n))
+- 04/04/20: added api.is_node(node) to perform an instance check:
+            - isinstance(node, (structure.Node, structure.Root))
+- 04/04/20: implemented 'edit data' command and added api.edit_data(new, node)
+            base function
+- 04/04/20: added api.log.is_startup to indicate whether the program is
+            in startup phase (initialising plugins and creating data tree)
+            - this can be used in plugin hooks to use different behaviour
+              at startup
+- 04/04/20: structure.NameDispatcher(ref, warn) now also accepts the
+            'warn' argument which will, if any value other than None, will
+            make the dispatcher produce an APIWarning if a new name is added
+            to its reference
+            - the value of 'warn' is printed in the warning message so it
+              should be a string
+            - the name of the key being assigned to is added to the end of the
+              warning message
+            - api.log uses this to warn when a new log value is added
+- 04/04/20: SaveCommand updated syntax 'save [as 'name'|current] [and exit]'
+            - feature added is 'save as current' which will use
+              api.log.data_source as the file name + directory to save the data
+              tree to (it should be the same as the input data and therefore
+              will overwrite it)
+            - obviously, it is still possible for other plugins to modify the
+              value of api.log.data_source
+- 04/04/20: tagger.plugins.default.WhatCommand now can quit the listing of all
+            of the commands' help entry by typing 'q'
+[COMMITED ON 04/04/20]
 
 
 IN PROGRESS:
 implementing default commands - ones left to do:
-- edit data
 - edit tag name
 - edit tag value
 
 
 NEXT UP:
+- add ALL the plugin hooks for EACH API base function SEPRATELY
+
 - add backward references or absolute references from root
 - in api.manual_execute, add options to queue the command in command_queue or
   post_commands (with index)
-- add ALL the plugin hooks for EACH API base function SEPRATELY
 - dot parsing in command signatures (e.g. 2.1.3) and check if node.node.node is
   a valid or child that exists
 

@@ -335,13 +335,12 @@ class CLIParser(ParserBase):
         if (isinstance(part, structure.Input)
             and self.current_token.type == part.type):
             return True
+        if isinstance(part, structure.Flag):
+            return self.flag_matches_lookahead(part)
         if self.token_is_keyword(self.current_token, part.value):
             return True
         if isinstance(part, structure.Or):
             return any(self.part_matches_token(p) for p in part.parts)
-        if (isinstance(part, structure.Flag)
-            and self.flag_matches_lookahead(part)):
-            return True
         return False
 
     def flag_matches_lookahead(self, flag):
@@ -556,14 +555,19 @@ def _recursive_construct(parser, _depth, _parent, _top_level=False):
 
 def construct_tree(parser):
     parser = Buffer(parser)
-    title = next(parser).data
+    title = next(parser)
+    if title is None:
+        api.warning('no tree title given, defaulting to Tree')
+        title = 'Tree'
+    else:
+        title = title.data
     root = structure.Root(title)
     initialised = False
     while isinstance(parser.lookahead(1), structure.TagPattern):
         pattern = next(parser)
         api.append_tag_value(pattern.data, pattern.value, root, create=True)
         if pattern.data == 'config':
-            api._config = pattern.value
+            api.log.plugin_file = pattern.value
             api.initialise_plugins()
             initialised = True
     if not initialised:

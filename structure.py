@@ -1,5 +1,7 @@
 """Objects used for data parsing."""
 
+from tagger import api
+
 
 class Root:
     """Base of the data tree."""
@@ -170,3 +172,24 @@ class OptionalPhrase(SignaturePattern):
 
     def __next__(self):
         return next(self.parts)
+
+
+class NameDispatcher:
+    def __init__(self, reference, warn=None):
+        self._dispatch_ref = reference
+        self._warn = warn
+
+    def __getattribute__(self, k):
+        if k in ['_dispatch_ref', '_warn']:
+            return object.__getattribute__(self, k)
+        try:
+            return self._dispatch_ref[k]
+        except KeyError as e:
+            raise AttributeError(str(e))
+
+    def __setattr__(self, k, v):
+        if k in ['_dispatch_ref', '_warn']:
+            object.__setattr__(self, k, v)
+        elif self._warn is not None and k not in self._dispatch_ref:
+            api.warning(str(self._warn) + k)
+        self._dispatch_ref[k] = v

@@ -106,9 +106,20 @@ class Hooks(api.Hooks):
                 string = '\n'.join([string, '{}• {}'.format('  ' * i, k)])
             else:
                 if isinstance(v, list):
-                    v = ', '.join([str(vi) for vi in v])
-                string = '\n'.join([string, '{}• {}: {}'
-                                    .format('  ' * i, k, v)])
+                    v = v.copy()
+                    string = '\n'.join([string, '{}• {}: '.format('  ' * i, k)])
+                    if v:
+                        string = ''.join([string, str(v.pop(0)) + ','])
+                        while v:
+                            string = '\n'.join([
+                                string,
+                                '{}  {}  {},'.format('  ' * i, ' ' * len(k),
+                                                    v.pop(0))
+                            ])
+                        string = string[:-1]  # remove last comma
+                else:
+                    string = '\n'.join([string, '{}• {}: {}'
+                                        .format('  ' * i, k, v)])
 
         if current.children:
             string = '\n'.join([
@@ -142,7 +153,7 @@ class Hooks(api.Hooks):
         return '>>> '
 
     def inspect_commands(commands):
-        """Modify the commands about to be executed
+        """Modify the commands about to be executed.
 
         commands: list of commands [Command]
 
@@ -151,13 +162,20 @@ class Hooks(api.Hooks):
         return commands
 
     def inspect_post_commands(commands):
-        """Modify the commands in the post_commands queue
+        """Modify the commands in the post_commands queue.
 
         commands: list of commands [Command]
 
         return value: list of commands
         """
         return commands
+
+    def startup_hook():
+        """Execute code as soon as the plugin is registered.
+
+        return value: None
+        """
+        pass
 
 
 class ExitCommand(api.Command):
@@ -166,24 +184,26 @@ class ExitCommand(api.Command):
     description = 'exit the program'
 
     def execute(self):
-        if api.unsaved_changes:
+        if api.log.unsaved_changes:
             print('There are unsaved changes to the data tree')
         print('Are you sure? Type \'yes\' to confirm')
         v = input().lower().strip()
         if v == 'yes':
-            exit()
+            api.exit()
 
 
 class SaveCommand(api.Command):
 
     ID = 'save'
-    signature = '[as STRING=name] <and exit>'
+    signature = '[as STRING=name|<current>] <and exit>'
     defaults = {'name': None}
     description = 'save the data tree to a file'
 
-    def execute(self, name, and_exit):
-        cwd = os.path.split(api.data_source)[0]
-        if name is None:
+    def execute(self, name, current, and_exit):
+        cwd = os.path.split(api.log.data_source)[0]
+        if current:
+            file = api.log.data_source
+        elif name is None:
             file = 'output.txt'
             if file in os.listdir(cwd):
                 i = 1
@@ -288,7 +308,7 @@ class HelpCommand(api.Command):
             for k in disabled:
                 print('-', k)
         else:
-            c = api.resolve(command)
+            c = api.resolve_command(command)
             # don't catch error, it will have the correct message already
             signature = api.resolve_signature(c)
             print('Help on command \'{}\':\n'.format(c.ID))
@@ -327,6 +347,9 @@ class HelpCommand(api.Command):
             return '({})'.format(' | '.join([
                 self.signature_syntax(x) for x in signature.parts
             ]))
+        if isinstance(signature, structure.Flag):
+            return ' '.join([self.signature_syntax(x)
+                             for x in signature.parts])
         if isinstance(signature, structure.Input):
             if signature.type == lexers.NUMBER:
                 return 'n'
