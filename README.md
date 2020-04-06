@@ -1,6 +1,9 @@
 # tagger
 Python program to manipulate data: traverse and tag using a customisable command line tool and application programming interface.
 
+### Documentation
+Read the tagger documentation [here](https://github.com/nchauhan890/tagger/wiki).
+
 ### Installation
 To install _tagger_, follow the following steps (Windows):
   1. Download the latest _tagger_ release [here](https://github.com/nchauhan890/tagger/archive/master.zip) as a `.zip` file.
