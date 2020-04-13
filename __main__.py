@@ -11,32 +11,25 @@ if __name__ == '__main__':
         description='Python program to manipulate data: traverse and tag using'
             'a customisable command line tool and application programming '
             'interface',
-        prog='tagger'
+        prog='tagger',
+        usage='python -m tagger [-h] -d FILE [-p DIR] [-w]',
+        epilog='See https://github.com/nchauhan890/tagger for more '
+            'information'
     )
     parser.add_argument('-d', '--data', help='data source to parse',
-                        required=True)
-    parser.add_argument('-p', '--plugins',
+                        required=True, metavar='FILE')
+    parser.add_argument('-p', '--plugins', metavar='DIR',
                         help='alternative location to look for plugins')
     parser.add_argument('-w', '--warnings', action='store_true',
                         help='cause warnings to be raised as errors')
     args = parser.parse_args()
-    api.log.warnings_on = args.warnings
     api.log.is_startup = True
-    api.log.data_source = os.path.abspath(args.data)
-    if args.plugins:
-        api.log.alternative_plugins_dir = os.path.abspath(args.plugins)
-
-    with open(args.data, 'r') as f:
-        content = []
-        for line in f:
-            if line.startswith('#'):
-                break
-            content.append(line)
-
-    api.import_base_plugins()
-    api._new_hooks = 0  # the previous import will change this value
+    api.manual_setup(
+        data_source=args.data, warnings=args.warnings,
+        alternative_plugins_dir=args.plugins
+    )
     try:
-        api.make_tree(''.join(content))
+        api.make_tree()
     except api.APIWarning as e:
         print('API Warning:', e)
     else:

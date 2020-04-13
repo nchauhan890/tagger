@@ -3,6 +3,7 @@
 import os
 import sys
 import importlib
+import importlib.util
 from functools import wraps
 
 from tagger import structure
@@ -25,7 +26,7 @@ _log = {
     'plugin_loaded': False,
     'warnings_on': False,
     'alternative_plugins_dir': None,
-    'data_source': '',
+    'data_source': None,
     'is_startup': False
 }
 _hook_names = [
@@ -42,16 +43,21 @@ _hook_names = [
     'startup_hook',
 ]
 hooks = dict.fromkeys(_hook_names)
-plugin = structure.NameDispatcher(hooks)
+plugin = structure.NameDispatcher(
+    hooks,
+    error_if_none='default plugin file may not have been '
+                  'registered as fallback'
+)
 log = structure.NameDispatcher(_log, warn='assigned to new log name: ')
 
 
 def initialise_plugins():
     global _importing_commands
     _success = True
-    config_base = log.plugin_file.rsplit('.', 1)[0]
-    # the plugin file without the (presumed) .py extension
+    config_base = None
     if log.plugin_file:
+        config_base = log.plugin_file.rsplit('.', 1)[0]
+        # the plugin file without the (presumed) .py extension
         try:
             importlib.import_module('tagger.plugins.{}'
                                     .format(config_base))
@@ -69,9 +75,11 @@ def initialise_plugins():
                 sys.modules[log.plugin_file.rsplit('.', 1)[0]] = module
                 spec.loader.exec_module(module)
         if _success:
-            print('Registered plugin file \'{}\'\n'.format(log.plugin_file))
+            register_success('Registered plugin file \'{}\'\n'.format(
+                log.plugin_file
+            ))
             log.plugin_loaded = True
-    plugin.startup_hook()  # execute even if failed as fallback is present
+    plugin.startup_hook()
     _importing_commands = True
     # import from default plugin directory:
     for entry in os.scandir('tagger/plugins'):
@@ -79,7 +87,8 @@ def initialise_plugins():
             name = entry.name.rsplit('.', 1)[0]
             if name != config_base:
                 importlib.import_module('tagger.plugins.{}'.format(name))
-                print('Registered command file \'{}\'\n'.format(name))
+                register_success('Registered command file \'{}\'\n'
+                                 .format(name))
     # import from alternative plugin directory:
     if log.alternative_plugins_dir:
         for entry in os.scandir(log.alternative_plugins_dir):
@@ -93,9 +102,10 @@ def initialise_plugins():
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[name] = module
                 spec.loader.exec_module(module)
-                print('Registered command file \'{}\'\n'.format(name))
+                register_success('Registered command file \'{}\'\n'
+                                 .format(name))
     _importing_commands = False
-    print('{} command{} registered, {} hook{} overridden'.format(
+    register_success('{} command{} registered, {} hook{} overridden'.format(
         _new_commands, '' if _new_commands == 1 else 's',
         _new_hooks, '' if _new_hooks == 1 else 's'
     ))
@@ -106,8 +116,13 @@ def initialise_plugins():
 
 def import_base_plugins():
     importlib.import_module('tagger.plugin')
-    print('Registered default plugin hooks')
-    print('Registered default commands\n')
+    register_success('Registered default plugin hooks')
+    register_success('Registered default commands\n')
+
+
+def register_success(message):
+    if log.is_startup:
+        print(message)
 
 
 def edits(func):
@@ -371,13 +386,41 @@ def exit():
     raise ProgramExit()
 
 
-def make_tree(source, overwrite=True):
+def manual_setup(data_source=None, warnings=False, alternative_plugins_dir=None,
+                 alt_plugins_dir=None):
+    """Manually call setup API functions.
+
+    data_source: file to use as data_source [str <dir>]
+    warnings: raise API warnings as errors [bool]
+    alternative_plugins_dir: set directory in which to search
+                             for plugins [str <dir>]
+    alt_plugins_dir: mirror to alternative_plugins_dir (shorthand) [str <dir>]
+    """
+    global _new_hooks
+    alt_plugins_dir = alternative_plugins_dir or alt_plugins_dir
+    log.warnings_on = warnings
+    if data_source:
+        log.data_source = os.path.abspath(data_source)
+    if alt_plugins_dir:
+        log.alternative_plugins_dir = os.path.abspath(alt_plugins_dir)
+    import_base_plugins()
+    _new_hooks = 0  # the previous import will change this value
+
+
+def make_tree(source=None, file=None, overwrite=True):
     global tree
     if tree is not None and not overwrite:
         warning(
             'tree already created; use api.make_tree(source, overwrite=True) '
             'to overwrite and stop warning'
         )
+    if source is None:
+        if not file:
+            file = log.data_source
+        if not file:
+            raise TypeError('no data source')
+        with open(file, 'r') as f:
+            source = f.read()
     tree = Tree(source)
     log.unsaved_changes = False
     # the construction will call API functions so this must be reset to False
@@ -513,7 +556,7 @@ class Command:
             cls.description = cls.__doc__
         registry[' '.join(cls.ID.split())] = cls
         _new_commands += 1
-        print('Registered command \'{}\''.format(cls.ID))
+        register_success('Registered command \'{}\''.format(cls.ID))
 
     signature = ''
     description = ''
@@ -694,13 +737,17 @@ class tests:
 
 class Hooks:
     def __init_subclass__(cls):
-        if not _importing_commands:
+        if _importing_commands:
+            return
             # don't import hooks except from plugin
-            global _new_hooks
-            for h in _hook_names:
-                if hasattr(cls, h):
-                    _new_hooks += 1
-                    hooks[h] = getattr(cls, h)
-                    # updating hooks will work with hookdispatcher as they're
-                    # the same dict object
-                    print('Registered hook \'{}\''.format(h))
+        global _new_hooks
+        for h in _hook_names:
+            if hasattr(cls, h):
+                _new_hooks += 1
+                hooks[h] = getattr(cls, h)
+                # updating hooks will work with hookdispatcher as they're
+                # the same dict object
+                register_success('Registered hook \'{}\''.format(h))
+
+
+raise TypeError('fix save as current!!')

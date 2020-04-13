@@ -130,6 +130,28 @@ what's changed between releases
 - 04/04/20: tagger.plugins.default.WhatCommand now can quit the listing of all
             of the commands' help entry by typing 'q'
 [COMMITED ON 04/04/20]
+- 06/04/20: cleaned up argparse help message
+- 06/04/20: removed a legacy feature that allowed comments at the END of the
+            data source to be ignored
+- 06/04/20: structure.NameDispatcher accepts error_if_none argument which will
+            raise an error if the value it returns is None - this is
+            used by api.plugin to warn when (probably) the default plugin
+            file was not registered instead of a generic NoneType TypeError
+- 06/04/20: made it easier to manually call the CLI and perform setup:
+            - added api.manual_setup(data_source, warnings, alt_plugins_dir)
+              which will assign the corresponding value to api.log and import
+              the default/fallback plugin hooks
+            - __main__.py now uses this in combination with argparse
+            - api.make_tree now accepts a file name instead of a direct text
+              source with make_tree(file='<file>')
+            - to manually call the CLI, follow these steps:
+              - import the API with 'from tagger import api' or equivalent
+              - call api.manual_setup(data_source, warnings, alt_plugins_dir):
+                (all parameters are optional, but it must be called to import
+                 the default plugin hooks)
+              - now call api.make_tree(source=None, file=None) - if no data
+                source was given, either 'source' or 'file' must be filled
+              - now api.run() can be called
 
 
 IN PROGRESS:

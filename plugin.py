@@ -201,9 +201,7 @@ class SaveCommand(api.Command):
 
     def execute(self, name, current, and_exit):
         cwd = os.path.split(api.log.data_source)[0]
-        if current:
-            file = api.log.data_source
-        elif name is None:
+        if name is None:
             file = 'output.txt'
             if file in os.listdir(cwd):
                 i = 1
@@ -213,6 +211,8 @@ class SaveCommand(api.Command):
                     file = 'output_{}.txt'.format(i)
             file = os.path.join(cwd, file)
         else:
+            if current:
+                name = os.path.basename(api.log.data_source)
             if name in os.listdir(cwd):
                 print('File already exists - do you want to overwrite?')
                 r = input('Type \'yes\' to overwrite\n').strip().lower()

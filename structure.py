@@ -175,20 +175,24 @@ class OptionalPhrase(SignaturePattern):
 
 
 class NameDispatcher:
-    def __init__(self, reference, warn=None):
+    def __init__(self, reference, warn=None, error_if_none=None):
         self._dispatch_ref = reference
         self._warn = warn
+        self._error_none = error_if_none
 
     def __getattribute__(self, k):
-        if k in ['_dispatch_ref', '_warn']:
+        if k in ['_dispatch_ref', '_warn', '_error_none']:
             return object.__getattribute__(self, k)
         try:
-            return self._dispatch_ref[k]
+            r = self._dispatch_ref[k]
+            if r is None and self._error_none is not None:
+                raise TypeError('{} ({})'.format(self._error_none, k))
+            return r
         except KeyError as e:
             raise AttributeError(str(e))
 
     def __setattr__(self, k, v):
-        if k in ['_dispatch_ref', '_warn']:
+        if k in ['_dispatch_ref', '_warn', '_error_none']:
             object.__setattr__(self, k, v)
         elif self._warn is not None and k not in self._dispatch_ref:
             api.warning(str(self._warn) + k)
