@@ -17,4 +17,4 @@ A description of what your idea is.
 A description of any alternative solutions or ideas you've considered.
 
 **Additional context**
-Add any other context about the diea or relevant screenshots here.
+Please add any other context about the idea or relevant screenshots here.
