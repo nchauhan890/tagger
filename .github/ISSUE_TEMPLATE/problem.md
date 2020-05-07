@@ -2,7 +2,7 @@
 name: Problem
 about: Report a problem so it can be fixed
 title: ''
-labels: bug
+labels: problem
 assignees: nchauhan890
 
 ---
