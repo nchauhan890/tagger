@@ -3,7 +3,7 @@
 from string import ascii_letters, digits
 
 import sys
-sys.setrecursionlimit(120)
+sys.setrecursionlimit(200)
 
 from tagger import lexers
 from tagger import structure
@@ -18,6 +18,7 @@ from tagger.lexers import (
 
 class ParserBase:
     """Base class to perform essential parsing functions."""
+
     def __init__(self, lexer):
         self.lexer = lexer
         self.current_token = self.lexer.generate_token()
@@ -25,20 +26,26 @@ class ParserBase:
         self._previous = None  # the token just consumed
 
     def eat(self, type, extra=''):
+        """Consume the given token and advance to the next.
+
+        type: the token type to eat [str]
+        extra: suffix to add to error message
+
+        return: the value of the consumed token
+        """
         if self.current_token.type == type:
             value = self.current_token.value
             self.advance_token()
         else:
-            value = (' ({})'.format(self.current_token.value)
+            value = (f' ({self.current_token.value})'
                      if self.current_token.type == KEYWORD else '')
 
-            self.raise_error('invalid token {}{} (expected {})'.format(
-                self.current_token.type, value,
-                type), extra=extra
-            )
+            self.raise_error(f'invalid token {self.current_token.type}'
+                             f'{value} (expected {type})', extra=extra)
         return value
 
     def advance_token(self):
+        """Move to the next token from the lexer."""
         self._previous = self.current_token
         if self.buffer:
             self.current_token = self.buffer.pop(0)
@@ -46,11 +53,22 @@ class ParserBase:
             self.current_token = next(self.lexer)
 
     def lookahead(self, n=1):
+        """Return an upcoming token without eating it.
+
+        n: [default=1] how many tokens ahead to return [int]
+
+        return: lookahead token [Token]
+        """
+        if n < 0:
+            raise ValueError('lookahead cannot be negative')
+        if n == 0:
+            return self.current_token
         while len(self.buffer) < n:
             self.buffer.append(next(self.lexer))
         return self.buffer[n-1]
 
     def raise_error(self, msg, error=None, extra='', token=None):
+        """Raise an error and add formatting to error message."""
         error = error or SyntaxError
         token = token or self.current_token
         if extra:
@@ -67,6 +85,7 @@ class ParserBase:
 
 class InputPatternParser(ParserBase):
     """Parse tokens for data source and produce patterns."""
+
     def __next__(self):
         return self.generate_pattern()
 
@@ -94,7 +113,9 @@ class InputPatternParser(ParserBase):
 
 class CLIParser(ParserBase):
     """Parse tokens from CLI input and produce commands."""
+
     def generate_commands(self):
+        """Create list of commands from CLI input."""
         commands = []
         c = self.command()
         if c is not None:
@@ -108,15 +129,20 @@ class CLIParser(ParserBase):
         return commands
 
     def eat_keyword(self, keyword):
+        """Eat a keyword token, checking it has the correct value too."""
         if (self.current_token.type != KEYWORD
             or self.current_token.value != keyword):
-            self.raise_error('expected token KEYWORD ({})'.format(keyword))
+            self.raise_error(f'expected token KEYWORD ({keyword})')
         self.eat(KEYWORD)
 
-    def token_is_keyword(self, token, keyword):
+    def token_is_keyword(self, token, keyword, *, part=None):
+        """Check whether a token is a given keyword."""
+        if part is not None and not isinstance(part, structure.Keyword):
+            return False
         return token.type == KEYWORD and token.value == keyword
 
     def command(self):
+        """Generate one command by parsing CLI input."""
         current = self.current_token
         command_name = []
         current_reg = {}
@@ -126,10 +152,7 @@ class CLIParser(ParserBase):
             return
 
         def error(t):
-            self.raise_error(
-                'invalid token {}'.format(t.type),
-                token=t
-            )
+            self.raise_error(f'invalid token {t.type}', token=t)
 
         def first_level_key(dict):
             for key in dict:
@@ -161,7 +184,7 @@ class CLIParser(ParserBase):
             c = self.eat(KEYWORD)
             if c not in first_level_key(current_reg):
                 self.raise_error(
-                    'unknown command \'{}\''.format(c),
+                    f'unknown command \'{c}\'',
                     token=current
                 )
             current_reg = advance_registry_level(current_reg, c)
@@ -184,6 +207,7 @@ class CLIParser(ParserBase):
             self.current_part = structure.End()
 
     def scan_for_inputs_or_flags(self, phrase):
+        """Search the input for inputs or flags."""
         r = {}
         for part in phrase:
             if isinstance(part, structure.Optional):
@@ -206,16 +230,21 @@ class CLIParser(ParserBase):
         return r
 
     def parse_using_signature(self, command):
+        """Parse a command's arguments using its signature.
+
+        command: command name [str]
+
+        return: command with inputs assigned to it [Command]
+        """
         signature = api.resolve_signature(command)
         if command.disabled():
-            raise api.CommandError('command \'{}\' is disabled'.format(
-                command.ID
-            ))
+            raise api.CommandError(f'command \'{command.ID}\' is disabled')
         self.sig = SignatureParser(
             lexers.SignatureLexer(signature),
             command.ID
         )
         self.signature_parts = self.sig.make_signature()
+        k = self.signature_parts
         self.parts = Buffer(iter(self.signature_parts))
         found_inputs = self.scan_for_inputs_or_flags(self.signature_parts)
         self.inputs = found_inputs
@@ -231,18 +260,18 @@ class CLIParser(ParserBase):
                 self.parse_signature_token()
             except api.CommandError as e:
                 self.raise_error(
-                    '{} for command \'{}\' (signature: {})'
-                    .format(str(e), command.ID,
-                    api.resolve_signature(command)),
+                    f'{str(e)} for command \'{command.ID}\' '
+                    f'(signature: {api.resolve_signature(command)})',
                     error=api.CommandError
                 )
         command.inputs = self.inputs
         return command
 
     def parse_signature_token(self):
+        """Parse one element of a command's signature."""
         current_part = self.current_part
         if isinstance(current_part, structure.OptionalPhrase):
-            self.parse_optional_signature()
+            self.parse_optional_phrase()
 
         elif isinstance(current_part, structure.Phrase):
             self.parse_phrase()
@@ -251,23 +280,33 @@ class CLIParser(ParserBase):
             found_something_not_optional = False
             # this will allow the Or to go 'unparsed' if all of the elements
             # inside it are optional i.e. OptionalPhrase or Flag or Optional
+            matches = []
             for part in current_part.parts:
                 if not isinstance(part, (structure.OptionalPhrase,
                     structure.Optional, structure.Flag)):
                     found_something_not_optional = True
                 if self.part_matches_token(part):
-                    self.current_part = part
-                    self.parse_signature_token()
-                    break
-            else:  # unbroken (nothing parsed)
-                if found_something_not_optional:
-                    extra = (' ({})'.format(current_part.value)
-                            if current_part.type == KEYWORD else '')
-                    raise api.CommandError('expected token {}{}'.format(
-                        current_part.type, extra
-                    ))
+                    matches.append(part)    
+
+            if matches:
+                matches = sorted(matches, key=lambda x:
+                    len(getattr(x, 'parts', ' '))
+                )
+                print(matches)
+                self.current_part = matches[-1]
+                # inject this part as the current (next) part to be parsed
+                self.parse_signature_token()
+            elif found_something_not_optional:
+                extra = (f' ({current_part.value})'
+                         if current_part.type == KEYWORD else '')
+                raise api.CommandError(
+                    f'expected token {current_part.type}'
+                    f'{extra}'
+                )
+            else:
                 # don't raise an error if all were optional
-            self.next_part()
+                self.next_part()  # only skip if nothing was parsed
+                # since if it did parse it would do the skip itself
 
         elif isinstance(current_part, structure.Flag):
             if self.flag_matches_lookahead(current_part):
@@ -283,11 +322,10 @@ class CLIParser(ParserBase):
                 self.inputs[current_part.argument] = (
                     self.eat(
                         current_part.type,
-                        extra='for input \'{}\''.format(
-                            current_part.argument
-                        )
+                        extra=f'for input \'{current_part.argument}\''
                 ))
-            elif self.token_is_keyword(self.current_token, current_part.value):
+            elif self.token_is_keyword(self.current_token, current_part.value,
+                                       part=current_part):
                 # check whether token matches optional keyword's value
                 self.eat_keyword(current_part.value)
             self.next_part()  # skip regardless (since this is optional)
@@ -301,13 +339,12 @@ class CLIParser(ParserBase):
                     self.inputs[current_part.argument].append(
                         self.eat(
                             current_part.type,
-                            extra='for input \'{}\''.format(
-                                current_part.argument)
+                            extra=f'for input \'{current_part.argument}\''
                         )
                     )  # all variable arguments go into a list
             else:  # it's a keyword
                 while self.token_is_keyword(self.current_token,
-                                            current_part.value):
+                        current_part.value, part=current_part):
                     self.eat_keyword(current_part.value)
 
                     # match the value, since KEYWORD can be any value
@@ -317,7 +354,7 @@ class CLIParser(ParserBase):
             self.inputs[current_part.argument] = (
                 self.eat(
                     current_part.type,
-                    extra='for input \'{}\''.format(current_part.argument))
+                    extra=f'for input \'{current_part.argument}\'')
             )  # attempt to match string or number
             self.next_part()
 
@@ -326,24 +363,27 @@ class CLIParser(ParserBase):
             self.next_part()
 
         else:
-            raise api.CommandError(
-                'unexpected signature element \'{}\''
-                .format(current_part.__class__.__name__)
-            )
+            raise api.CommandError('unexpected signature element \''
+                                   f'{current_part.__class__.__name__}\'')
 
-    def part_matches_token(self, part):
-        if (isinstance(part, structure.Input)
-            and self.current_token.type == part.type):
+    def part_matches_token(self, part, token=None):
+        """Determine if a signature part matches a token."""
+        token = token or self.current_token
+        if isinstance(part, (structure.OptionalPhrase, structure.Phrase)):
+            return self.phrase_matches_lookahead(part)
+        if isinstance(part, structure.Input) and token.type == part.type:
             return True
         if isinstance(part, structure.Flag):
             return self.flag_matches_lookahead(part)
-        if self.token_is_keyword(self.current_token, part.value):
+        if self.token_is_keyword(token, part.value, part=part):
+            print('--keyword')
             return True
-        if isinstance(part, structure.Or):
+        if isinstance(part, structure.Or):  
             return any(self.part_matches_token(p) for p in part.parts)
         return False
 
     def flag_matches_lookahead(self, flag):
+        """Determine if the current tokens match a flag name."""
         if self.current_token.type != KEYWORD:
             return False
         tokens = [self.current_token.value]
@@ -355,12 +395,37 @@ class CLIParser(ParserBase):
         name = '_'.join(tokens)
         return name == flag.name
 
-    def parse_optional_signature(self):
+    def phrase_matches_lookahead(self, phrase):
+        """Determine if the current tokens match a phrase."""
+        lookahead = 0
+        for part in phrase.parts:
+            optional, variable = False, False
+            if isinstance(part, structure.Optional):
+                optional = True
+                part = part.pattern
+            elif isinstance(part, structure.Variable):
+                variable = True
+                part = part.pattern
+            t = self.lookahead(lookahead)
+            if not self.part_matches_token(part, t):
+                if not optional:
+                    return False
+                lookahead -= 1  # check the same token again
+            elif variable:
+                while self.part_matches_token(part, t):
+                    lookahead += 1
+                    t = self.lookahead(lookahead)
+            lookahead += 1
+        return True
+
+    def parse_optional_phrase(self):
+        """Parse an optional phrase if it is present."""
+        phrase = self.current_part
         self.current_optionals.append(self.current_part)
         self.pos.append(0)
         self.next_part()  # initialise current optional phrase
         current = self.current_part
-        if self.part_matches_token(current):
+        if self.phrase_matches_lookahead(phrase):
             for _ in range(len(self.current_optionals[-1].parts)):
                 self.parse_signature_token()
         self.current_optionals.pop()
@@ -370,6 +435,7 @@ class CLIParser(ParserBase):
         # outside the current optional phrase
 
     def parse_phrase(self, part=None):
+        """Parse a phrase."""
         if part is None:
             part = self.current_part
         self.current_optionals.append(part)
@@ -384,17 +450,21 @@ class CLIParser(ParserBase):
 
 class SignatureParser(ParserBase):
     """Parse tokens for command signatures and produce patterns."""
+
     def __init__(self, lexer, name):
         self.name = name
         ParserBase.__init__(self, lexer)
 
     def eat(self, *args, **kw):
         return ParserBase.eat(self, *args,
-            extra='in signature\nfor command \'{}\' (signature: {})'.format(
-                self.name, self.lexer.data
-        ))
+            extra=f'in signature\nfor command \'{self.name}\' '
+                  f'(signature: {self.lexer.data})')
 
     def make_signature(self):
+        """Parse a command signature to create a list of parts.
+
+        return: parts list [List: structure.SignaturePattern]
+        """
         parts = [self.get_part()]
         if parts[-1] == None:
             return []
@@ -406,6 +476,7 @@ class SignatureParser(ParserBase):
         return parts
 
     def get_part(self):
+        """Produce one signature part by recursive descent parsing."""
         return self.or_()
 
     def or_(self):
@@ -439,9 +510,7 @@ class SignatureParser(ParserBase):
         elif self.current_token.type == EOF:
             r = structure.End()
         else:
-            self.raise_error(
-                'invalid token {}'.format(self.current_token.type)
-            )
+            self.raise_error(f'invalid token {self.current_token.type}')
         if isinstance(r, (structure.Input, structure.Keyword)):
             if self.current_token.type == OPTIONAL:
                 self.eat(OPTIONAL)
@@ -458,7 +527,7 @@ class SignatureParser(ParserBase):
         while self.current_token.type != end:
             if self.current_token.type == EOF:
                 raise api.CommandError(
-                    'missing {}, got {}'.format(end, self.current_token.type)
+                    f'missing {end}, got {self.current_token.type}'
                 )
             parts.append(self.get_part())
         self.eat(RBRACKET if optional else RPAREN)
@@ -480,6 +549,8 @@ class SignatureParser(ParserBase):
 
 
 class Buffer:
+    """Wrap an iterable to allow lookahead functionality."""
+
     def __init__(self, obj):
         self.obj = obj
         self.queue = []
@@ -501,6 +572,7 @@ class Buffer:
 
 
 def _recursive_construct(parser, _depth, _parent, _top_level=False):
+    """Construct data tree using recursion."""
     plugin = api.plugin
     lookahead = parser.lookahead(1)
     children = []
@@ -511,8 +583,8 @@ def _recursive_construct(parser, _depth, _parent, _top_level=False):
         except AttributeError:
             parser.obj.raise_error('cannot have text')
         if diff > 1:
-            parser.obj.raise_error('cannot have new data point {} levels '
-                'deeper than current level'.format(diff))
+            parser.obj.raise_error(f'cannot have new data point {diff} '
+                'levels deeper than current level')
         elif diff == 0:
             current = next(parser)
             if isinstance(current, structure.TagPattern):
@@ -554,6 +626,12 @@ def _recursive_construct(parser, _depth, _parent, _top_level=False):
 
 
 def construct_tree(parser):
+    """Construct a data tree using a parser's output.
+
+    parser: [InputPatternParser]
+
+    return: data tree [structure.Root]
+    """
     parser = Buffer(parser)
     title = next(parser)
     if title is None:

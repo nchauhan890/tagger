@@ -8,14 +8,17 @@ string_chars = text_chars + whitespace
 
 
 class Token:
+    """Represent an element of an input, holding value and type."""
+
     def __init__(self, type, value):
         self.type = type
         self.value = value
 
     def __repr__(self):
-        return 'Token({}, {})'.format(repr(self.type), repr(self.value))
+        return f'Token({repr(self.type)}, {repr(self.value)})'
 
 
+# for input data
 STAR = 'STAR'
 TEXT = 'TEXT'
 TAG = 'TAG'
@@ -39,9 +42,9 @@ RPAREN = 'RPAREN'
 EOF = 'EOF'
 
 
-_single_char_conversion = {
-    '[': LBRACKET,
-    ']': RBRACKET,
+_single_char_conversion = {  # helper lookup table to make it faster to
+    '[': LBRACKET,           # convert elements that are only a single
+    ']': RBRACKET,           # character long
     '?': OPTIONAL,
     '*': VARIABLE,
     '<': LESS,
@@ -61,6 +64,7 @@ class LexerBase:
         self.queued_tokens = []
         self.line = 1
         self.col = 0
+        self.current = self.data[self.pos] if self.data else ''
 
     def next(self, n=1):
         """Return the character n places forward of the pointer."""
@@ -77,13 +81,6 @@ class LexerBase:
     def reset(self):
         self.__init__(self.data)
 
-    @property
-    def current(self):
-        try:
-            return self.data[self.pos]
-        except IndexError:
-            return ''
-
     def advance(self, n=1):
         """Move the pointer forward to the next character(s)."""
         r = ''
@@ -96,14 +93,19 @@ class LexerBase:
                     self.col = 0
                 r += char
             except IndexError:
-                char = ''
+                break  # reached the end of the data
         self.pos += n
+        try:
+            self.current = self.data[self.pos]
+        except IndexError:
+            self.current = ''
         return r
 
     def generate_token(self, *args, **kw):
         """Generate a token to be used by parser."""
-        raise TypeError('generate_token not implemented in {}'
-                        .format(type(self).__name__))
+        raise TypeError(
+            f'generate_token not implemented in {type(self).__name__}'
+        )
 
     def raise_error(self, msg, error=None):
         error = error or SyntaxError
@@ -163,6 +165,7 @@ class InputLexer(LexerBase):
         return r
 
     def generate_token(self):
+        """Tokenise one element of input data."""
         while self.current == '\n':
             self.advance()  # skip newlines
         char = self.current
@@ -174,9 +177,7 @@ class InputLexer(LexerBase):
             return Token(TAG, self.collect_tag())
         elif char in string_chars:
             return Token(TEXT, self.collect_text())
-        self.raise_error(
-            'invalid character \'{}\' in data source'.format(char)
-        )
+        self.raise_error(f'invalid character \'{char}\' in data source')
 
 
 class CLILexer(LexerBase):
@@ -212,6 +213,7 @@ class CLILexer(LexerBase):
         return r
 
     def generate_token(self):
+        """Tokenise one element of CLI input."""
         char = self.current
         while char.isspace():
             self.advance()
@@ -232,13 +234,14 @@ class CLILexer(LexerBase):
             return Token(STRING, self.collect_string())
         elif char == ';':
             return Token(SEMICOLON, self.advance())
-        self.raise_error('invalid character \'{}\' in command'.format(char))
+        self.raise_error(f'invalid character \'{char}\' in command')
 
 
 class SignatureLexer(LexerBase):
     """Tokenise a command signature."""
 
     def generate_token(self):
+        """Tokenise one element of a command signature."""
         char = self.current
         if char.isspace():
             char = self.skip_whitespace()
@@ -253,7 +256,7 @@ class SignatureLexer(LexerBase):
             return self.collect_text(upper=True)
         elif char in ascii_lowercase + '_':
             return self.collect_text()
-        self.raise_error('invalid character \'{}\' in command'.format(char))
+        self.raise_error(f'invalid character \'{char}\' in command')
 
     def skip_whitespace(self):
         while self.current.isspace():

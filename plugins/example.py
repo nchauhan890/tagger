@@ -3,6 +3,10 @@
 from tagger import api
 
 
+def startup_hook():
+    print('example startup hook')
+
+
 class ShowChildrenCommand(api.Command):
     """Show the children of the current node."""
 

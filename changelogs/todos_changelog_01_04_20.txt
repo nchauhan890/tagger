@@ -80,7 +80,8 @@ what's changed between releases
                   plugins in the new directory won't be automatically
                   registered unless api.initialise_plugins is called again
               - 'data source' which is a string of the path to the input data
-            [ADDED TO ON 04/04/20]
+        **  [ADDED TO ON 04/04/20]
+            [ADDED TO ON 14/04/20]
 - 02/04/20: added API hook 'api.plugin.startup_hook' which will be called as
             soon as the given plugin file ('config' tag of root) is loaded
             successfully
@@ -152,22 +153,105 @@ what's changed between releases
               - now call api.make_tree(source=None, file=None) - if no data
                 source was given, either 'source' or 'file' must be filled
               - now api.run() can be called
+[COMMITTED ON 13/04/20]
+- 13/04/20: added function api.priority(p) which should be used as a decorator
+            on input handler functions to assign them a priority.
+            - manually assigning by doing 'input_handler_x.priority = p'
+              still works, but this method is clearer and quicker
+            - default.NewDataCommand uses this with a negative priority (-1)
+              for one parameter so that it gets checked last
+            - other commands that now use the feature are default.InCommand,
+              default.EnterCommand
+- 13/04/20: added function api.may_return_none which should be used as a
+            decorator on input handler functions that may return None as an
+            actual value to use
+            - this will skip the check in api.execute_command which will (now)
+              raise an APIWarning if an input hander returns None because
+              there is a greater chance that whoever wrote the function forgot
+              to add a return statement to produce a value
+            - the attribute input_handler_x.may_return_none can be manually
+              set to True as this is what the function itself does
+- 13/04/20: implemented command 'edit tag name'
+- 14/04/20: fixed a problem where the program would crash when a file in a
+            plugin directory is not a valid python file - instead the file is
+            skipped
+- 14/04/20: changed api._new_hooks and api._new_commands to
+            api.log.new_hooks and api.log.new_commands
+            - this records how many commands have been registered and how many
+              hooks have been overriden (excluding the default hooks)
+- 14/04/20: moved api._importing_commands to api.log.importing commands which
+            is a boolean value indicating whether to only register commnads
+            (and not hooks) from plugin files (at startup)
+- 14/04/20: added api.reload_plugins and command 'reload <verbose>' which is
+            found in plugin.ReloadCommand (command comes with the program)
+            [FINISHED ON 04/06/20]
+- 14/04/20: added sub-functions in api and renamed api.import_base_plugins
+            to api._import_base_plugin:
+            - api._import_plugin_file
+            - api._import_other_plugins
+            - api._import_alt_dir_plugins
+- 04/06/20: fixed reload system to force reload by removing modules from
+            sys.modules
+- 04/06/20: all plugin files can now have a startup_hook() function in their
+            namespace (NOT within an api.Hooks subclass) which will be called
+            as soon as the plugin is loaded
+- 04/06/20: added 'and clean' flag to 'reload' command:
+            - signature is now 'reload <and clean> <verbose>
+            - the presence of this flag will remove any commands that are no
+              longer present in any plugin file instead of only adding new
+              commands (same for hooks)
+- 04/06/20: added api.compile_command(command_str, name) which will return a
+            hidden Command subclass that executes the given command (string)
+            as if it was typed into the CLI - used in BindCommand
+            - command inspection hook will still be called
+            - uses existing behaviour of api.prompt, however this has now been
+              split into a new function
+- 04/06/20: added BindCommand (comes with default package) which will create a
+            new command whose .execute method will run the command string
+            given, as if it was typed into the CLI
+- 04/06/20: added AliasCommand (comes with default package) which will
+            create an alias for a command
+- 04/06/20: added api.tests.is_valid_command_name which is a list of 2 test
+            commands to be unpacked in api.test_input (this does is an
+            attribute of api.tests, not a function, so doesn't need to be
+            called)
+- 06/06/20: added structure.NodeType which is subclassed by both
+            structure.Root and structure.Node to allow easier instance type
+            checking
+- 06/06/20: changed some python old .format strings to new f-strings
+- 06/06/20: changed some command parsing semantics which caused an error as
+            described below:
+            - previously, the parser would stop at the first match when
+              checking different parts of an OR expression in a command
+              signature
+            - this could cause an error when the parser would match a part
+              not intended to be matched:
+            - the signature '<option> | <option two>' would still match the
+              first flag 'option' even when 'option two' may have been typed
+              into the CLI because it was the first match
+            - now, greedy parsing has been implemented so the parser will try
+              to match the longest part out of all possible matches so that
+              the longer option will be chosen when present and the shorter
+              option is still matched when nothing else matches
+- 06/06/20: changed command parsing semantics when parsing optional phrases
+            and normal phrases so that they will only be parsed when the whole
+            of the phrase is matched
+- 06/06/20: fixed recursive dict problem in structure.NameDispatcher dispatch
+            reference
+- 07/06/20: changed some code in the lexer which should give a small speed
+            increase by removing the likelihood of repeated index accesses to
+            the same index
+- 07/06/20: added docstrings to most of the functions in api/lexer/parser.py
 
+
+**clean up files before committing**
 
 IN PROGRESS:
 implementing default commands - ones left to do:
-- edit tag name
 - edit tag value
 
 
 NEXT UP:
-- add ALL the plugin hooks for EACH API base function SEPRATELY
-
-- add backward references or absolute references from root
-- in api.manual_execute, add options to queue the command in command_queue or
-  post_commands (with index)
-- dot parsing in command signatures (e.g. 2.1.3) and check if node.node.node is
-  a valid or child that exists
 
 
 TODOS:
@@ -184,6 +268,7 @@ add back input_handler function and pre-written functions like
 get_yes_or_no from the unseen pre-pre-release version
 
 - add environment variables $depth $data (perhaps?)
+- add ALL the plugin hooks for EACH API base function SEPRATELY
 
 
 [Commands-related things]
@@ -197,7 +282,14 @@ get_yes_or_no from the unseen pre-pre-release version
 
 - make a general command queue object to hold both command queue lists as one
   and know where new commands should be added
+- dot parsing in command signatures (e.g. 2.1.3) and check if node.node.node is
+  a valid or child that exists
+
+- add backward references or absolute references from root
+- in api.manual_execute, add options to queue the command in command_queue or
+  post_commands (with index)
 
 
 [Input-related things]
-None at the moment
+- consider having the option to (import from/export to) JSON file as an
+  alternative to the custom file format

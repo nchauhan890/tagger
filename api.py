@@ -5,127 +5,188 @@ import sys
 import importlib
 import importlib.util
 from functools import wraps
+from string import ascii_letters
 
 from tagger import structure
 from tagger import lexers
 from tagger import parsers
 
-
 tree = None
 registry = {}
 command_queue = []  # the list of current commands that needs to be executed
-post_commands = []
-# commands that will be executed after all of the ones in command_queue have
-# finished (used for InCommand)
-_importing_commands = False
-_new_hooks = 0
-_new_commands = 0
+post_commands = []  # commands that will be executed after all of the ones
+                    # in command_queue have finished (used for InCommand)
 _log = {
-    'unsaved_changes': False,
-    'plugin_file': None,
-    'plugin_loaded': False,
+    'unsaved_changes': False,         # the log holds information that is
+    'plugin_file': None,              # meant to be accessible to plugins
+    'plugin_loaded': False,           # through api.log
     'warnings_on': False,
-    'alternative_plugins_dir': None,
+    'alternative_plugins_dir': None,  # it will ease certain checks
     'data_source': None,
-    'is_startup': False
+    'is_startup': False,
+    'new_hooks': 0,
+    'new_commands': 0,
+    'importing_commands': False,
 }
 _hook_names = [
-    'pre_node_creation_hook',
-    'post_node_creation_hook',
-    'tag_name_hook',
+    'pre_node_creation_hook',   # to register a new hook, the easist way is to
+    'post_node_creation_hook',  # add the name to this list and add the call
+    'tag_name_hook',            # somewhere in the API
     'tag_name_input_test',
-    'tag_value_hook',
-    'tag_value_input_test',
+    'tag_value_hook',           # hooks won't be registered if the name isn't
+    'tag_value_input_test',     # in this list
     'display_hook',
-    'prompt_string',
-    'inspect_commands',
-    'inspect_post_commands',
-    'startup_hook',
+    'prompt_string',            # it is possible to add to the list at runtime,
+    'inspect_commands',         # but plugins will need to be reloaded for a
+    'inspect_post_commands',    # new hook to be registered
 ]
 hooks = dict.fromkeys(_hook_names)
 plugin = structure.NameDispatcher(
     hooks,
+    warn='assigned to new hook name: ',
     error_if_none='default plugin file may not have been '
                   'registered as fallback'
 )
 log = structure.NameDispatcher(_log, warn='assigned to new log name: ')
 
 
-def initialise_plugins():
-    global _importing_commands
+def initialise_plugins(*, reload=False):
+    """Try to load a plugin file and register command files."""
     _success = True
     config_base = None
     if log.plugin_file:
-        config_base = log.plugin_file.rsplit('.', 1)[0]
-        # the plugin file without the (presumed) .py extension
-        try:
-            importlib.import_module('tagger.plugins.{}'
-                                    .format(config_base))
-        except ModuleNotFoundError:
-            spec = None
-            if log.alternative_plugins_dir:
-                d = os.path.join(log.alternative_plugins_dir, log.plugin_file)
-                spec = importlib.util.spec_from_file_location(
-                    log.plugin_file, d
-                )
-            if spec is None:
-                _success = False
-            else:
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[log.plugin_file.rsplit('.', 1)[0]] = module
-                spec.loader.exec_module(module)
-        if _success:
-            register_success('Registered plugin file \'{}\'\n'.format(
-                log.plugin_file
-            ))
-            log.plugin_loaded = True
-    plugin.startup_hook()
-    _importing_commands = True
-    # import from default plugin directory:
-    for entry in os.scandir('tagger/plugins'):
-        if entry.is_file():
-            name = entry.name.rsplit('.', 1)[0]
-            if name != config_base:
-                importlib.import_module('tagger.plugins.{}'.format(name))
-                register_success('Registered command file \'{}\'\n'
-                                 .format(name))
-    # import from alternative plugin directory:
+        _success, config_base = _import_plugin_file(_success, config_base,
+                                                    reload=True)    
+    log.importing_commands = True
+    _import_other_plugins(config_base, reload=True)
+    # import from default plugin directory
     if log.alternative_plugins_dir:
-        for entry in os.scandir(log.alternative_plugins_dir):
-            if not entry.is_file():
-                continue
-            name = entry.name.rsplit('.', 1)[0]
-            if name != config_base:
+        _import_alt_dir_plugins(config_base)
+    log.importing_commands = False
+    startup_message('{} command{} registered, {} hook{} overridden'.format(
+        log.new_commands, '' if log.new_commands == 1 else 's',
+        log.new_hooks, '' if log.new_hooks == 1 else 's'
+    ))
+    if not _success:
+        warning(f'could not register plugin file \'{log.plugin_file}\'')
+
+
+def _import_plugin_file(_success, config_base, *, reload=False):
+    """Import the plugin file from the default or alternative directory."""
+    config_base = log.plugin_file.rsplit('.', 1)[0]
+    # the plugin file without the (presumed) .py extension
+    try:
+        name = f'tagger.plugins.{config_base}'
+        if (reload and importlib.util.find_spec(name) is not None
+              and name in sys.modules):
+            del sys.modules[name]  # delete current version to allow reload
+        m = importlib.import_module(name)
+        call_startup_hook(m)
+
+    except ModuleNotFoundError:
+        spec = None
+        if log.alternative_plugins_dir:
+            try:
+                d = os.path.join(log.alternative_plugins_dir,
+                                 log.plugin_file)
                 spec = importlib.util.spec_from_file_location(
-                    name, entry.path
+                    config_base, d
                 )
+                if spec is None:
+                    _success = False
+                else:
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[config_base] = module
+                    spec.loader.exec_module(module)
+                    call_startup_hook(module)
+            except FileNotFoundError:
+                _success = False
+        else:
+            _success = False
+    if _success:
+        startup_message(f'Registered plugin file \'{config_base}\'\n')
+        log.plugin_loaded = True
+    return _success, config_base
+
+
+def _import_other_plugins(config_base, *, reload=False):
+    """Import other plugin files from the default directory."""
+    for entry in os.scandir('tagger/plugins'):
+        if not entry.is_file():
+            continue
+        name = entry.name.rsplit('.', 1)[0]
+        if name != config_base:
+            module_name = f'tagger.plugins.{name}'
+            if (reload and importlib.util.find_spec(module_name) is not None
+                  and module_name in sys.modules):
+                del sys.modules[module_name]
+            m = importlib.import_module(module_name)
+            call_startup_hook(m)
+            startup_message(f'Registered command file \'{name}\'\n')
+
+
+def _import_alt_dir_plugins(config_base):
+    """Import other plugin files from the alternative directory."""
+    try:
+        directory = os.scandir(log.alternative_plugins_dir)
+    except FileNotFoundError:
+        warning('cannot find alternative plugins directory {}'.format(
+            log.alternative_plugins_dir
+        ))
+        return
+    for entry in directory:
+        if not entry.is_file():
+            continue
+        name = entry.name.rsplit('.', 1)[0]
+        if name != config_base:
+            spec = importlib.util.spec_from_file_location(
+                name, entry.path
+            )
+            if spec is not None:  # found a proper python file
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[name] = module
                 spec.loader.exec_module(module)
-                register_success('Registered command file \'{}\'\n'
-                                 .format(name))
-    _importing_commands = False
-    register_success('{} command{} registered, {} hook{} overridden'.format(
-        _new_commands, '' if _new_commands == 1 else 's',
-        _new_hooks, '' if _new_hooks == 1 else 's'
-    ))
-    if not _success:
-        warning('could not register plugin file \'{}\''
-                .format(log.plugin_file))
-                
+                call_startup_hook(module)
+                startup_message(f'Registered command file \'{name}\'\n')
 
-def import_base_plugins():
+
+def _import_base_plugin(*, reload=False):
+    """Import the default plugin file found in tagger.plugin."""
+    if reload:
+        del sys.modules['tagger.plugin']  # remove cache so reload occurs
     importlib.import_module('tagger.plugin')
-    register_success('Registered default plugin hooks')
-    register_success('Registered default commands\n')
+    startup_message('Registered default plugin hooks')
+    startup_message('Registered default commands\n')
 
 
-def register_success(message):
+def reload_plugins(*, clean=False):
+    """Reload all plugins if a plugin file was updated."""
+    global registry
+    if clean:
+        registry = {}
+    log.new_commands = 0
+    if clean:
+        _import_base_plugin(reload=True)  # only reset hooks when cleaning
+    log.new_hooks = 0
+    if tree is not None:
+        log.plugin_file = tree.root.tags.get('config', log.plugin_file)
+        # attempt to update the plugin config using the data tree
+    initialise_plugins(reload=True)
+
+
+def startup_message(message):
+    """Display a message if log.is_startup is True."""
     if log.is_startup:
         print(message)
 
 
+def call_startup_hook(module):
+    """Attempt to call a plugin's startup hook."""
+    getattr(module, 'startup_hook', lambda: None)()
+
+
 def edits(func):
+    """Decorator to indicate that the function modifies the data tree."""
     @wraps(func)
     def wrapper(*args, **kw):
         r = func(*args, **kw)
@@ -133,6 +194,20 @@ def edits(func):
         return r
     return wrapper
 
+
+def priority(priority):
+    """Decorator to give input handlers a .priority attribute."""
+    def wrapper(func):
+        func.priority = priority
+        return func
+    return wrapper
+
+
+def may_return_none(func):
+    """Decorator for input handlers that might purposefully return None."""
+    func.may_return_none = True
+    return func
+    
 
 class ProgramExit(Exception):
     """Raised to quit program."""
@@ -156,6 +231,7 @@ class APIWarning(UserWarning):
 
 class Tree:
     """Hold the data tree."""
+
     def __init__(self, source):
         """Initialise a data tree from a source string."""
         self.parser = parsers.InputPatternParser(lexers.InputLexer(source))
@@ -255,8 +331,9 @@ def edit_data(new, node=None):
     """
     if node is None:
         node = tree.current_node
+    if not tests.not_whitespace(new):
+        raise NodeError('data cannot be empty')
     node.data = new
-    
 
 
 @edits
@@ -277,9 +354,9 @@ def edit_tag_name(tag, new_tag, node=None, create=False):
         if create:
             new_tag(new_tag, None, node)
             return
-        raise NodeError('tag \'{}\' not found'.format(tag))
+        raise NodeError(f'tag \'{tag}\' not found')
     if not plugin.tag_name_input_test(node, tag, new_tag):
-        raise NodeError('invalid tag name {}'.format(new_tag))
+        raise NodeError(f'invalid tag name {new_tag}')
     new_tag = plugin.tag_name_hook(node, tag, new_tag)
     if not tests.not_whitespace(new_tag):
         raise NodeError('tag name cannot be empty')
@@ -301,7 +378,7 @@ def edit_tag_value(tag, new_value, node=None, create=False):
         node.tags[tag]
     except KeyError:
         if not create:
-            raise NodeError('tag \'{}\' not found'.format(tag))
+            raise NodeError(f'tag \'{tag}\' not found')
     new_tag(tag, new_value, node)
 
 
@@ -316,10 +393,10 @@ def new_tag(tag, value=None, node=None):
     if node is None:
         node = tree.current_node
     if not plugin.tag_name_input_test(node, None, tag):
-        raise NodeError('invalid tag name {}'.format(value))
+        raise NodeError(f'invalid tag name {tag}')
     tag = plugin.tag_name_hook(node, tag, tag)
     if not plugin.tag_value_input_test(node, tag, None, value):
-        raise NodeError('invalid tag value {}'.format(value))
+        raise NodeError(f'invalid tag value {value}')
     value = plugin.tag_value_hook(
         node, tag, None, value
     )
@@ -347,10 +424,10 @@ def append_tag_value(tag, new_value, node=None, create=False):
         if create:
             new_tag(tag, new_value, node)
             return
-        raise NodeError('tag \'{}\' not found'.format(tag))
+        raise NodeError(f'tag \'{tag}\' not found')
     if not plugin.tag_value_input_test(node, tag,
         node.tags[tag], new_value):
-        raise NodeError('invalid tag value {}'.format(new_value))
+        raise NodeError(f'invalid tag value {new_value}')
     new_value = plugin.tag_value_hook(
         node, tag, node.tags[tag], new_value
     )
@@ -379,15 +456,16 @@ def remove_tag(tag, node=None):
     try:
         return node.tags.pop(tag)
     except KeyError:
-        raise NodeError('tag \'{}\' not found'.format(tag))
+        raise NodeError(f'tag \'{tag}\' not found')
 
 
 def exit():
+    """Raise ProgramExit to end the CLI."""
     raise ProgramExit()
 
 
-def manual_setup(data_source=None, warnings=False, alternative_plugins_dir=None,
-                 alt_plugins_dir=None):
+def manual_setup(data_source=None, warnings=False,
+                 alternative_plugins_dir=None, alt_plugins_dir=None):
     """Manually call setup API functions.
 
     data_source: file to use as data_source [str <dir>]
@@ -396,18 +474,23 @@ def manual_setup(data_source=None, warnings=False, alternative_plugins_dir=None,
                              for plugins [str <dir>]
     alt_plugins_dir: mirror to alternative_plugins_dir (shorthand) [str <dir>]
     """
-    global _new_hooks
     alt_plugins_dir = alternative_plugins_dir or alt_plugins_dir
     log.warnings_on = warnings
     if data_source:
         log.data_source = os.path.abspath(data_source)
     if alt_plugins_dir:
         log.alternative_plugins_dir = os.path.abspath(alt_plugins_dir)
-    import_base_plugins()
-    _new_hooks = 0  # the previous import will change this value
+    _import_base_plugin()
+    log.new_hooks = 0  # the previous import will change this value
 
 
 def make_tree(source=None, file=None, overwrite=True):
+    """Create a data tree from raw text or a file location.
+
+    source: raw text to use to create data tree [str], or;
+    file: path to text file to read [str]
+    overwrite: [default=True] overwrite the current data tree if one exists
+    """
     global tree
     if tree is not None and not overwrite:
         warning(
@@ -450,14 +533,19 @@ def run():
 
 
 def prompt():
-    """Read CLI input and execute given command(s)."""
+    """Read CLI input."""
     if tree is None:
         raise NodeError(
             'no data tree created; use api.make_tree(source)'
         )
     print(plugin.display_hook(tree.current_node))
     print(plugin.prompt_string(tree.current_node), end='')
-    lexer = lexers.CLILexer(input())
+    return _generate_commands(input())
+
+
+def _generate_commands(command_str):
+    """Generate commands from CLI text."""
+    lexer = lexers.CLILexer(command_str)
     parser = parsers.CLIParser(lexer)
     commands = parser.generate_commands()
     commands = plugin.inspect_commands(commands)
@@ -478,9 +566,7 @@ def execute_command(command):
     try:
         inputs = command.inputs  # may be an empty dict
     except AttributeError:
-        raise InputError(
-            'no inputs given to command \'{}\''.format(command.ID)
-        )
+        raise InputError(f'no inputs given to command \'{command.ID}\'')
     inputs = fill_missing_args(command, inputs)
     items = sorted(
         inputs.items(),
@@ -495,11 +581,11 @@ def execute_command(command):
         try:
             was_none, fail = False, False
             if value is None:
-                was_none = True
+                was_none = True  # value not present
                 try:
                     value = command.defaults[name]
                 except KeyError:
-                    fail = True
+                    fail = True  # no default given
                 else:
                     fail = False
                     # escape the 'if' condition when the default value
@@ -507,15 +593,17 @@ def execute_command(command):
             if fail or not was_none:
                 test = getattr(command, 'input_handler_'+name)
                 value = test(value)
-                if value is None:
-                    print('input handler for parameter', name, 'returned None')
+                if (value is None
+                      and not getattr(test, 'may_return_none', False)):
+                    warning(f'input handler for parameter \'{name}\' '
+                            'returned None')
             inputs[name] = value
         except (NodeError, InputError) as e:
             raise InputError(str(e))
         except AttributeError:
             if was_none and value is None:
                 raise CommandError('no default value given for parameter '
-                    '\'{}\''.format(name)
+                    f'\'{name}\''
                 )
     try:
         return command.execute(**inputs)
@@ -525,12 +613,14 @@ def execute_command(command):
             # this should only match TypeError arising from the wrong
             # number of inputs given to the command
             raise InputError('not enough or too many inputs given to command '
-                '\'{}\''.format(command.ID)
+                f'\'{command.ID}\''
             )
         raise
 
+
 class Command:
     """Produced by CLI parser to represent given traversal commands."""
+
     def __repr__(self):
         return '{}({})'.format(
             self.__class__.__name__,
@@ -541,22 +631,25 @@ class Command:
 
     def execute(self, *args, **kw):
         """Execute the command."""
-        raise CommandError('command \'{}\' not implemented'.format(
-            self.ID
-        ))
+        raise CommandError(f'command \'{self.ID}\' not implemented')
 
     def disabled(self):
+        """Indicate whether a command is disabled in the current context."""
         return False
 
     def __init_subclass__(cls):
-        global _new_commands
         if not cls.__doc__ and not cls.description:
             cls.description = ''
         elif not cls.description and cls.__doc__:
             cls.description = cls.__doc__
+        if not hasattr(cls, 'ID'):
+            raise CommandError(
+                f'class \'{cls.__name__}\' is not bound to a command name -'
+                ' no ID attribute'
+            )
         registry[' '.join(cls.ID.split())] = cls
-        _new_commands += 1
-        register_success('Registered command \'{}\''.format(cls.ID))
+        log.new_commands += 1
+        startup_message(f'Registered command \'{cls.ID}\'')
 
     signature = ''
     description = ''
@@ -564,24 +657,36 @@ class Command:
 
 
 def resolve_command(name):
-    """Try to find a Command subclass which has the given name.
+    """Try to find a Command subclass which has the given registry entry.
 
     name: the keyword bound to the command [str]
-    return value: Command subclass
+    return value: Command subclass instance
     """
     try:
         return registry[name]()
     except KeyError:
-        raise CommandError('unknown command \'{}\''.format(name))
+        raise CommandError(f'unknown command \'{name}\'')
 
 
 def is_disabled(command):
+    """Check if a command is disabled.
+
+    command: command instance or cubclass [Command/type]
+
+    return: bool
+    """
     if isinstance(command, type):
         command = command()  # instantiate if subclass passed
     return command.disabled()
 
 
 def resolve_signature(command):
+    """Retrieve command signature or evaluate dynamic signature.
+
+    command: command instance or subclass [Command/type]
+
+    return: command's signature [str]
+    """
     if isinstance(command, type):
         command = command()  # instantiate if subclass passed
     try:
@@ -591,16 +696,36 @@ def resolve_signature(command):
 
 
 def fill_missing_args(command, args):
-    inputs = command.defaults.copy()
+    """Try to fill in optional argument values of a command.
+
+    command: command instance or subclass [Command/type]
+    args: the arguments for the command [dict: str-any]
+
+    1. A base dict is created by scanning the signature for inputs or flags.
+    2. The dict is updated with the command's defaults if given
+    3. The dict is updated with the given arguments which overwrite the
+        defaults
+
+    return: arguments with defaults filled in where possible [dict]
+    """
     _lex = lexers.SignatureLexer(resolve_signature(command))
     _par = parsers.SignatureParser(_lex, command.ID)
-    inputs.update(parsers.CLIParser(lexers.CLILexer(''))
+    inputs = (parsers.CLIParser(lexers.CLILexer(''))
              .scan_for_inputs_or_flags(_par.make_signature()))
+    inputs.update(command.defaults.copy())
     inputs.update(args)
     return inputs
 
 
 def manual_execute(command, args):
+    """Execute a command with given arguments from code rather than CLI.
+
+    command: command name string or command instance/subclass
+             [Command/type/str]
+    args: the given arguments to the command [dict: str-any]
+
+    return: return value of command (usually None) [any]
+    """
     if isinstance(command, type):
         command = command()
     elif not isinstance(command, Command):  # should be a string
@@ -610,7 +735,16 @@ def manual_execute(command, args):
 
 
 def test_input(input, message, *tests):
-    """Raise an error if the test function fails."""
+    """Raise an error if the test function fails.
+
+    message: error message(s) to use [str, list:str]
+    *tests: test commands to check input - each should return True to indicate
+            that the test passed
+
+    If messages is a list, a different error message will be used for each
+    test whether the order of the messages should matche the order of the
+    test functions.
+    """
     try:
         r = 0
         for i, test in enumerate(tests):
@@ -624,13 +758,25 @@ def test_input(input, message, *tests):
 
 
 def resolve_child(indexes, node=None, offset=False):
+    """Resolve a child node using a list of indexes.
+
+    indexes: a list of indexes to get to the child [list: int]
+    node: the base node to start from [default=current node]
+    offset: assume index 1 is the first index, not index 0
+
+    The child is resolved in a way equivalent to:
+    child = (node.children[indexes[0]].children[indexes[1]]
+             .children[indexes[2]].....children[indexes[n]])
+
+    return: the resolved node, otherwise IndexError raised
+    """
     if offset:  # starting from 1
         indexes = [i-1 for i in indexes]
     if node is None:
         node = tree.current_node
     for i in indexes:
         try:
-            if i < 0:  # don't allow accidental negative index
+            if i < 0 and offset:  # don't allow accidental negative index
                 raise IndexError()
             node = node.children[i]
         except IndexError:
@@ -640,15 +786,43 @@ def resolve_child(indexes, node=None, offset=False):
     return node
 
 
+def compile_command(command_str, name, desc=''):
+    """Return a command that executes the string as if typed into the CLI.
+
+    command_str: the string that represents a command on the CLI
+    name: the name to bind to the commannd
+    desc: [optional] a description to give the command
+
+    The .execute method of the CompiledCommand class will call
+    _generate_commands(command_str) so that the string is parsed as if it
+    was read from a CLI input.
+
+    return: dynamically created CompiledCommand class
+    """
+    class CompiledCommand(Command):
+        ID = name
+        description = desc
+
+        def execute(self):
+            _generate_commands(command_str)
+
+    return CompiledCommand
+
+
 def warning(message):
+    """Print a warning or raise an APIWarning.
+
+    Output depends on log.warnings_on (APIWarning raised if True)
+    """
     if log.warnings_on:
         raise APIWarning(message)
     else:
         print('API Warning:', message)
 
 
-def is_node(node):
-    return isinstance(node, (structure.Node, structure.Root))
+def is_node(obj):
+    """Determine if an object is an instance of NodeType (Node or Root)."""
+    return isinstance(obj, structure.NodeType)
 
 
 class tests:
@@ -661,6 +835,7 @@ class tests:
 
     @staticmethod
     def integer(input):
+        """Test if input can be converted to an integer."""
         try:
             int(input)
         except ValueError:
@@ -669,6 +844,7 @@ class tests:
 
     @staticmethod
     def numerical(input):
+        """Test if input can be converted to float."""
         try:
             float(input)
         except ValueError:
@@ -719,7 +895,7 @@ class tests:
 
     @staticmethod
     def is_valid_child_index(num, true_index=False):
-        """Return function to test if 0 < x <= num.
+        """Return functions to test if 0 < x <= num.
 
         num: number of children OR node whose children to use [int/Node]
         true_index: use indexes starting from 0, not 1
@@ -734,20 +910,26 @@ class tests:
             zero = -1
         return [tests.integer, tests.greater_than(zero), tests.less_equal(num)]
 
+    is_valid_command_name = [
+        lambda x: all(i[0] in (ascii_letters+'_') for i in x.split()),
+        # starts with letter/underscore
+        lambda x: not bool(set(x) - set(f'{ascii_letters}0123456789_ '))
+        # only contains letters/numbers/underscores/
+    ]
+
 
 class Hooks:
+    """Class which must be subclassed to register custom API hooks."""
+
     def __init_subclass__(cls):
-        if _importing_commands:
+        """Initialise a subclass and register its valid hooks."""
+        if log.importing_commands:
             return
             # don't import hooks except from plugin
-        global _new_hooks
         for h in _hook_names:
             if hasattr(cls, h):
-                _new_hooks += 1
+                log.new_hooks += 1
                 hooks[h] = getattr(cls, h)
                 # updating hooks will work with hookdispatcher as they're
                 # the same dict object
-                register_success('Registered hook \'{}\''.format(h))
-
-
-raise TypeError('fix save as current!!')
+                startup_message(f'Registered hook \'{h}\'')

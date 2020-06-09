@@ -3,17 +3,22 @@
 from tagger import api
 
 
-class Root:
+class NodeType:
+    """Base type of Node class."""
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.data})'
+
+
+class Root(NodeType):
     """Base of the data tree."""
+
     def __init__(self, name, tags=None):
         tags = tags or {}
         self.data = name
         self.tags = tags
         self.children = []
         self.depth = 0
-
-    def __repr__(self):
-        return 'Root({})'.format(self.data)
 
     @property
     def parent_list(self):
@@ -28,8 +33,9 @@ class Root:
         return 0
 
 
-class Node:
+class Node(NodeType):
     """A data point in the data tree."""
+
     def __init__(self, data, depth, parent):
         self.data = data
         self.depth = depth
@@ -37,9 +43,6 @@ class Node:
         self.parent = parent
         self.children = []
         self._parent_list = [*self.parent.parent_list, self.parent]
-
-    def __repr__(self):
-        return 'Node({})'.format(self.data)
 
     def _clean_data(self):
         self.data = str(self.data)
@@ -66,17 +69,17 @@ class Node:
 
 class Pattern:
     """Produced by input parser to represent text, tags and data points."""
+
     def __repr__(self):
         if isinstance(self, TagPattern):
-            return 'TagPattern({}, {}, {})'.format(
-                repr(self.data), repr(self.value), repr(self.depth)
-            )
+            return (f'TagPattern({self.data!r}, {self.value!r}, '
+                    f'{self.depth!r})')
+
         if isinstance(self, NodePattern):
-            return 'NodePattern({}, {})'.format(
-                repr(self.data), repr(self.depth)
-            )
+            return f'NodePattern({self.data!r}, {self.depth!r})'
+
         if isinstance(self, TextPattern):
-            return 'TextPattern({})'.format(repr(self.data))
+            return f'TextPattern({self.data!r})'
         return super().__str__()
 
 
@@ -103,13 +106,23 @@ class SignaturePattern:
 
     Used when parsing command signatures.
     """
+
     def __init__(self, token):
         self.value = token.value
         self.type = token.type
 
+    def __repr__(self):
+        return '{}({})'.format(
+            self.__class__.__name__,
+            ', '.join('{}={}'.format(
+                k, repr(v)) for k, v in self.__dict__.items()
+            )
+        )
+
 
 class Optional(SignaturePattern):
     """Wrapper around signature elements that may not be present."""
+
     def __init__(self, pattern):
         self.pattern = pattern
         self.type = pattern.type
@@ -118,6 +131,7 @@ class Optional(SignaturePattern):
 
 class Variable(SignaturePattern):
     """Wrapper around signature elements that can be repeated"""
+
     def __init__(self, pattern):
         self.pattern = pattern
         self.type = pattern.type
@@ -138,12 +152,15 @@ class Flag(SignaturePattern):
 
 class Input(SignaturePattern):
     """Represents the STRING or NUMBER input field in signatures."""
+
     def __init__(self, token, argument_name):
         super().__init__(token)
         self.argument = argument_name
 
 
 class Or(SignaturePattern):
+    """Represents an OR expression in command signatures."""
+
     def __init__(self, parts):
         self.parts = parts
         self.type = self.parts[0].type
@@ -165,6 +182,7 @@ class Phrase(SignaturePattern):
 
 class OptionalPhrase(SignaturePattern):
     """Represents a group of elements which all may or may not be present."""
+
     def __init__(self, parts):
         self.parts = parts
         self.type = self.parts[0].type
@@ -175,6 +193,12 @@ class OptionalPhrase(SignaturePattern):
 
 
 class NameDispatcher:
+    """Helper class to convert attribute lookup to dictionary lookup.
+
+    Can warn when value being returned is None and when a non-existent
+    key is being assigned to.
+    """
+
     def __init__(self, reference, warn=None, error_if_none=None):
         self._dispatch_ref = reference
         self._warn = warn
@@ -196,4 +220,5 @@ class NameDispatcher:
             object.__setattr__(self, k, v)
         elif self._warn is not None and k not in self._dispatch_ref:
             api.warning(str(self._warn) + k)
-        self._dispatch_ref[k] = v
+        else:
+            self._dispatch_ref[k] = v

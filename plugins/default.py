@@ -1,6 +1,7 @@
 """Default commands for tagger API."""
 
 import os
+import copy
 
 from tagger import api
 from tagger import structure
@@ -20,6 +21,7 @@ class EnterCommand(api.Command):
         for i in inputs:
             api.enter_node(i - 1)  # node 1 is index 0
 
+    @api.priority(1)
     def input_handler_index(self, i):
         num = len(api.tree.current_node.children)
         api.test_input(
@@ -47,8 +49,6 @@ class EnterCommand(api.Command):
         except IndexError as e:
             raise api.InputError('invalid index {}'.format(e))
         return inputs
-
-    input_handler_index.priority = 1
 
 
 class ReturnCommand(api.Command):
@@ -123,6 +123,7 @@ class NewDataCommand(api.Command):
         else:
             node.children.insert(position-1, api.new_node(data, parent=node))
 
+    @api.priority(-1)
     def input_handler_position(self, i):
         if self.inputs.get('node', None) is None:
             node = api.tree.current_node
@@ -152,9 +153,6 @@ class NewDataCommand(api.Command):
         api.test_input(i, 'data cannot be empty', api.tests.not_whitespace,
                    bool)
         return i
-
-    input_handler_node.priority = 1
-    input_handler_data.priority = 2
 
 
 class NewTagCommand(api.Command):
@@ -271,6 +269,38 @@ class EditTagNameCommand(api.Command):
             return '[of NUMBER=node] STRING=tag STRING=new'
         return 'STRING=tag STRING=new'
 
+    def execute(self, tag, new, node):
+        if self.inputs['node'] is None:
+            node = api.tree.current_node
+        else:
+            node = api.tree.current_node.children[self.inputs['node']]
+        api.edit_tag_name(tag, new, node=node)
+
+    @api.priority(1)
+    def input_handler_node(self, i):
+        num = len(api.tree.current_node.children)
+        api.test_input(num, 'current node does not have any entries', bool)
+        api.test_input(
+            i, ['node index must be an integer', 'node index must be greater '
+                'than 0', 'node index must not exceed {}'.format(num)],
+           *api.tests.is_valid_child_index(num)
+        )
+        return int(i)
+
+    def input_handler_tag(self, i):
+        if self.inputs['node'] is None:
+            node = api.tree.current_node
+        else:
+            node = api.tree.current_node.children[self.inputs['node']]
+        if i not in node.tags:
+            raise api.InputError('tag \'{}\' not found'.format(i))
+        return i
+
+    def input_handler_new(self, i):
+        api.test_input(i, 'tag name cannot be empty',
+                       api.tests.not_whitespace, bool)
+        return i
+
 
 class EditTagValueCommand(api.Command):
 
@@ -332,6 +362,7 @@ class InCommand(api.Command):
         r.inputs = api.fill_missing_args(r, {'depth': 1})
         api.post_commands.append(r)
 
+    @api.priority(1)
     def input_handler_node(self, i):
         num = len(api.tree.current_node.children)
         api.test_input(
@@ -359,8 +390,6 @@ class InCommand(api.Command):
         except IndexError as e:
             raise api.InputError('invalid index {}'.format(e))
         return inputs
-
-    input_handler_node.priority = 1
 
 
 class WhatCommand(api.Command):
@@ -416,3 +445,71 @@ class WhatCommand(api.Command):
             ))
         else:
             raise api.InputError('no argument given')
+
+
+class BindCommand(api.Command):
+
+    ID = 'bind'
+    signature = ('STRING=command to STRING=name STRING=description? '
+                 '<with command>')
+    description = 'bind a preset command to another name'
+    defaults = {'description': ''}
+
+    def execute(self, command, name, description, with_command):
+        if name in api.registry:
+            print('Are you sure you want to overwrite this command name?\n'
+                  'Type \'yes\' to confirm')
+            v = input().lower().strip()
+            if v != 'yes':
+                return
+        if description and with_command:
+            description = f'{description} [{command}]'
+        elif not description and with_command:
+            description = command
+        api.registry[name] = api.compile_command(command, name, description)
+
+    def input_handler_name(self, name):
+        name = ' '.join(name.strip().split())
+        api.test_input(
+            name,
+            ['command name must start with letter or underscore',
+             'invalid character in command name'],
+            *api.tests.is_valid_command_name
+        )
+        return name
+
+
+class AliasCommand(api.Command):
+
+    ID = 'alias'
+    signature = 'STRING=command as STRING=alias'
+    description = 'create an alias for a command name'
+
+    def execute(self, command, alias):
+        if alias in api.registry:
+            print('Are you sure you want to overwrite this command name?\n'
+                  'Type \'yes\' to confirm')
+            v = input().lower().strip()
+            if v != 'yes':
+                return
+        command = copy.deepcopy(command)
+        command.ID = alias
+        api.registry[alias] = command  # already converted by input handler
+
+    def input_handler_command(self, i):
+        i = i.strip().lower()
+        try:
+            c = type(api.resolve_command(i))
+        except api.CommandError:
+            raise api.InputError('command \'{}\' does not exist'.format(i))
+        return c
+
+    def input_handler_alias(self, name):
+        name = ' '.join(name.strip().lower().split())
+        api.test_input(
+            name,
+            ['command name must start with letter or underscore',
+             'invalid character in command name'],
+            *api.tests.is_valid_command_name
+        )
+        return name

@@ -299,7 +299,7 @@ some entries marked with an asterisk may have changed
               separated by OR ('|')
 - 19/02/20: changed flag command signature syntax to '<flag>' to accommodate
             multi-word flags:
-            - syntax is the same: '<multi keyword flag>']
+            - syntax is the same: '<multi keyword flag>'
             - since spaces cannot be used as python parameter names in
               functions, names will have their spaces changed to underscores
               e.g. '<multi keyword flag>' passed as 'multi_keyword_flag'
@@ -346,8 +346,7 @@ some entries marked with an asterisk may have changed
 - 25/02/20: added prompt at the end of ExitCommand.execute that asks if the
             user has saved, to try and prevent accidental loss of modifications
 - 25/02/20: 'new data' command now has the phrase 'at n' as an optional part;
-            by default the position is set internally as -1 indicating the end
-            of the current list of child nodes
+            by default the position is the end of the current list of children
 - 25/02/20: all API hooks must now be put into a class that subclasses
             api.Hooks
             - added api.Hooks class to allow this, with an __init_subclass__

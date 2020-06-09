@@ -153,7 +153,7 @@ class Hooks(api.Hooks):
         return '>>> '
 
     def inspect_commands(commands):
-        """Modify the commands about to be executed.
+        """Inspect/modify the commands about to be executed.
 
         commands: list of commands [Command]
 
@@ -162,7 +162,7 @@ class Hooks(api.Hooks):
         return commands
 
     def inspect_post_commands(commands):
-        """Modify the commands in the post_commands queue.
+        """Inspect/modify the commands in the post_commands queue.
 
         commands: list of commands [Command]
 
@@ -170,15 +170,17 @@ class Hooks(api.Hooks):
         """
         return commands
 
-    def startup_hook():
-        """Execute code as soon as the plugin is registered.
 
-        return value: None
-        """
-        pass
+def startup_hook():
+    """Execute code as soon as the plugin is registered.
+
+    return value: None
+    """
+    pass
 
 
 class ExitCommand(api.Command):
+    """Command to exit the program."""
 
     ID = 'exit'
     description = 'exit the program'
@@ -193,6 +195,7 @@ class ExitCommand(api.Command):
 
 
 class SaveCommand(api.Command):
+    """Command to save data tree to output file."""
 
     ID = 'save'
     signature = '[as STRING=name|<current>] <and exit>'
@@ -201,7 +204,7 @@ class SaveCommand(api.Command):
 
     def execute(self, name, current, and_exit):
         cwd = os.path.split(api.log.data_source)[0]
-        if name is None:
+        if name is None and not current:
             file = 'output.txt'
             if file in os.listdir(cwd):
                 i = 1
@@ -277,6 +280,7 @@ class SaveCommand(api.Command):
 
 
 class HelpCommand(api.Command):
+    """Command to display information about other commands."""
 
     ID = 'help'
     description = ('display information about registered commands or about '
@@ -348,11 +352,27 @@ class HelpCommand(api.Command):
                 self.signature_syntax(x) for x in signature.parts
             ]))
         if isinstance(signature, structure.Flag):
-            return ' '.join([self.signature_syntax(x)
-                             for x in signature.parts])
+            return '[{}]'.format(' '.join([self.signature_syntax(x)
+                                           for x in signature.parts]))
         if isinstance(signature, structure.Input):
             if signature.type == lexers.NUMBER:
                 return 'n'
             if signature.type == lexers.STRING:
                 return '\'{}\''.format(signature.argument)
         return str(signature.value)
+
+
+class ReloadCommand(api.Command):
+    """Command to reload plugin files."""
+
+    ID = 'reload'
+    signature = '<and clean> <verbose>'
+    description = 'reload all plugin files'
+
+    def execute(self, and_clean, verbose):
+        if verbose:
+            current = api.log.is_startup
+            api.log.is_startup = True
+        api.reload_plugins(clean=and_clean)
+        if verbose:
+            api.log.is_startup = current

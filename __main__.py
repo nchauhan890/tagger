@@ -1,7 +1,6 @@
 """Setup and run API traversal command line interface."""
 
 import sys
-import os
 import argparse
 
 from tagger import api
