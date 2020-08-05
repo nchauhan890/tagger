@@ -114,7 +114,7 @@ class Hooks(api.Hooks):
                             string = '\n'.join([
                                 string,
                                 '{}  {}  {},'.format('  ' * i, ' ' * len(k),
-                                                    v.pop(0))
+                                                     v.pop(0))
                             ])
                         string = string[:-1]  # remove last comma
                 else:
@@ -146,10 +146,12 @@ class Hooks(api.Hooks):
     def prompt_string(current=None):
         """Return the prompt string for CLI.
 
-        current: the current node [Node]
+        current: the current node (or None if not in a data tree) [Node]
 
         return value: a string for the CLI prompt [str]
         """
+        if current is None:
+            return '> '
         return '>>> '
 
     def inspect_commands(commands):
@@ -170,6 +172,15 @@ class Hooks(api.Hooks):
         """
         return commands
 
+    def capture_return(return_values):
+        """Capture the return values of commands executed in each loop.
+
+        return_values: a list of tuples in the form (ID, return_value)
+                       for each command that run
+        return value: None
+        """
+        return None
+
 
 def startup_hook():
     """Execute code as soon as the plugin is registered.
@@ -185,13 +196,27 @@ class ExitCommand(api.Command):
     ID = 'exit'
     description = 'exit the program'
 
-    def execute(self):
-        if api.log.unsaved_changes:
+    def signature(self):
+        if api.tree is None:
+            return ''
+        return '<and return> <without saving>'
+
+    def execute(self, **kw):
+        without_saving = kw.get('without_saving', False)
+        and_return = kw.get('and_return', False)
+        if api.log.unsaved_changes and not without_saving:
             print('There are unsaved changes to the data tree')
-        print('Are you sure? Type \'yes\' to confirm')
-        v = input().lower().strip()
+            return
+        if not without_saving:
+            print('Are you sure? Type \'yes\' to confirm')
+            v = input().lower().strip()
+        else:
+            v = 'yes'
         if v == 'yes':
-            api.exit()
+            if and_return:
+                api.tree = None
+            else:
+                api.exit()
 
 
 class SaveCommand(api.Command):
@@ -337,7 +362,7 @@ class HelpCommand(api.Command):
             ]))
         if isinstance(signature, structure.Phrase):
             if len(signature.parts) == 1:
-                return self.signature_syntax(parts[0])
+                return self.signature_syntax(signature.parts[0])
             return '({})'.format(' '.join([
                 self.signature_syntax(x) for x in signature.parts
             ]))
@@ -354,11 +379,10 @@ class HelpCommand(api.Command):
         if isinstance(signature, structure.Flag):
             return '[{}]'.format(' '.join([self.signature_syntax(x)
                                            for x in signature.parts]))
-        if isinstance(signature, structure.Input):
-            if signature.type == lexers.NUMBER:
-                return 'n'
-            if signature.type == lexers.STRING:
-                return '\'{}\''.format(signature.argument)
+        if isinstance(signature, structure.NumberInput):
+            return 'n'
+        if isinstance(signature, structure.NumberInput):
+            return '\'{}\''.format(signature.argument)
         return str(signature.value)
 
 
@@ -376,3 +400,42 @@ class ReloadCommand(api.Command):
         api.reload_plugins(clean=and_clean)
         if verbose:
             api.log.is_startup = current
+
+
+class LoadCommand(api.Command):
+    """Command to find a loader to manually load a data tree."""
+
+    ID = 'load'
+    signature = 'STRING=file [using STRING=loader]'
+    description = 'find a loader command to manually load a data tree'
+    defaults = {'loader': 'default loader'}
+
+    def disabled(self):
+        return api.tree is not None
+
+    def execute(self, file, loader):
+        loader = api.resolve_command(loader)
+        prev = api.log.disable_all, api.log.is_startup
+        api.log.disable_all = False
+        api.log.is_startup = True
+        api.log.data_source = os.path.abspath(file)
+        r = api._generate_commands(f'{loader.ID} \'{file}\'')
+        api.log.disable_all, api.log.is_startup = prev
+        # run the loading command
+        api.tree = api.Tree(r[0][1])
+        # value of first (loader) command to be run
+
+    def input_handler_loader(self, i):
+        return ' '.join(i.split())
+
+
+class SetCommand(api.Command):
+    """Set api.log values."""
+
+    ID = 'set'
+    signature = ('STRING=name to (STRING=value STRING=extra*)'
+                 '|(NUMBER=value NUMBER=extra*)')
+    description = 'set a value in api.log'
+
+    def execute(self, name, value, extra):
+        super().execute()

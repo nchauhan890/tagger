@@ -1,3 +1,5 @@
+TODOs and Changelog from 01/04/20
+
 CHANGELOG:
 
 Format:
@@ -103,7 +105,7 @@ what's changed between releases
               a list of the 3 test functions it holds (it still accepts a
               number or a Node object)
             - the list returned should be unpacked into api.test_input:
-            - 'api.test_input(i, [msgs], *api.is_valid_child_index(n))
+            - api.test_input(i, [msgs], *api.is_valid_child_index(n))
 - 04/04/20: added api.is_node(node) to perform an instance check:
             - isinstance(node, (structure.Node, structure.Root))
 - 04/04/20: implemented 'edit data' command and added api.edit_data(new, node)
@@ -121,7 +123,7 @@ what's changed between releases
             - the name of the key being assigned to is added to the end of the
               warning message
             - api.log uses this to warn when a new log value is added
-- 04/04/20: SaveCommand updated syntax 'save [as 'name'|current] [and exit]'
+- 04/04/20: SaveCommand updated syntax 'save [as \'name\'|current] [and exit]'
             - feature added is 'save as current' which will use
               api.log.data_source as the file name + directory to save the data
               tree to (it should be the same as the input data and therefore
@@ -196,7 +198,7 @@ what's changed between releases
             namespace (NOT within an api.Hooks subclass) which will be called
             as soon as the plugin is loaded
 - 04/06/20: added 'and clean' flag to 'reload' command:
-            - signature is now 'reload <and clean> <verbose>
+            - signature is now 'reload <and clean> <verbose>'
             - the presence of this flag will remove any commands that are no
               longer present in any plugin file instead of only adding new
               commands (same for hooks)
@@ -242,27 +244,198 @@ what's changed between releases
             increase by removing the likelihood of repeated index accesses to
             the same index
 - 07/06/20: added docstrings to most of the functions in api/lexer/parser.py
-
+- 25/07/20: data source is no longer required in command line options
+            - NodeError is no longer raised if there is no data source at
+              startup
+            - when there is no data source given at startup, the CLI changes
+              its display so that a data source can be loaded using a custom
+              loader
+- 25/07/20: added api.log.disable_all which is a boolean value which dictates
+            whether all commands are disabled or not
+- 25/07/20: added api.log.disable_exemptions which is a list of command IDs
+            that cannot be disabled - this list should not have permanent names
+            in it and should be set for a specific purpose then set back to
+            what it was
+- 25/07/20: added api.disabled which is a list of commands that are currently
+            disabled even if the command's .disabled() method says otherwise
+            (this list overrides Command.disabled)
+            - api.is_disabled(c) should be used at all times instead of
+              checking Command.disabled()
+            - the priority of api.is_disabled is as follows:
+              - if the command ID is in log.disable_exemptions, return False
+              - else, if log.disable_all is True, return True
+              - else, if command ID is in log.disabled, return True
+              - else return the result of command.disabled()
+- 25/07/20: added plugin.LoadCommand which is a command to manually load a data
+        **  source from any format (e.g. JSON)
+            [IMPLEMENTED ON 26/07/20]
+- 25/07/20: when the CLI has no tree loaded, the only commands that are enabled
+            are 'help', 'load', 'exit' and 'reload'
+- 25/07/20: added plugin.capture_return(returns) to enable the results of
+            commands to be captured
+            - it is a list in the form [(ID, return)] where each tuple has the
+              command ID and its return value as a pair
+- 26/07/20: api.execute_command(c) now will check whether a command is disabled
+            before execution so disabled commands cannot be run manually either
+- 26/07/20: added plugins.JSONLoaderCommand which has the syntax:
+            'json loader \'file\''
+            - it should only be used by LoadCommand and not directly
+            - it loads data in JSON format (see tagger.sample_data.json)
+- 26/07/20: added api.found_plugin_file(file, reload=True) which will set
+            api.plugin_file to the file path and reload plugins
+- 26/07/20: finished the loading mechanism to manually load a data tree from
+            a source in a different format
+        **  - plugin.LoadCommand has the syntax:
+              'load \'file\' using \'loader\''
+              - 'file' is the path (relative/absolute) of the data source
+              - 'loader' is the loader command (ID) to use
+            - the loader command should be an api.Command subclass whose
+              signature is a single string argument which will be used as the
+              file path
+            - the loader should return a structure.Root instance which will be
+              the loaded data tree
+            - the loader should use api.found_plugin_file(file) if it is needed
+              to load a plugin file
+            - api.initialise_commands(reload=True) may be used; however,
+              commands will have already been loaded (except plugin hooks) so
+              the reload option is needed
+            - the loader may choose to mirror the default behaviour of giving a
+              data tree the default name 'Tree' if no name is found
+            - the loader should use api functions like api.append_tag_value
+              to perform checks on data and use plugin hooks automatically if
+              loaded
+            - structure.Root should be used to create the root
+            - api.new_node should be used to create child nodes so plugin hooks
+              are executed
+              [CHANGED ON 05/08/20]
+- 26/07/20: 'return' command extended to support 'return home' which will
+            return traversal to the root node instead of having to find what
+            depth the current traversal is at
+- 27/07/20: added plugin.SetCommand which can be used to set certain values in
+            api.log
+            - this can be used to change the plugin file more easily when using
+              the CLI or to change the alternative plugins directory
+- 27/07/20: started to add structure.Capture and parsing for it {capture}
+        **  - true/false value
+            - can only contain keyword
+            - this can be used to test whether an optional phrase was present
+              by testing if a keyword was present
+            - this can be used to check which option in an OR expression was
+              present if all of the options must be non-optional (not a flag or
+              optional phrase) and don't have any inputs in them
+            - added LBRACE and RBRACE tokens to signature lexer
+              [CHANGED ON 29/07/20]
+- 28/07/20: added a parser feature where any command being run will have its
+            parsed signature set as an attribute on the command class so that
+            it doesn't need to be parsed again (saving time)
+            - available as Command.sig_cache (no attribute if not yet parsed)
+- 29/07/70: started to redesign the signature and CLI parser to make it easier
+            to extend
+            - changed names of signature element names in structure.py
+            - keyword capture will be available
+- 04/08/20: changed lexers.SignatureLexer so that keywords in signatures
+            can mix upper and lower case (since they'll be converted to
+            lowercase anyway)
+- 04/08/20: redesigned CLI and signature parser with more implementation in
+            structure.py - the spec for command signatures is as follows:
+            - string inputs are accepted in the form STRING=arg where
+              'arg' is the name of the input
+            - number inputs (integers) are accepted in the form NUMBER=arg
+              where 'arg' is the name of the input
+            - keywords are accepted as-is and can contain letters, underscores
+              and digits
+              - cannot start with a digit
+              - case-insensitive (all converted to lowercase)
+              - (uppercase only) STRING and NUMBER imply an input argument
+                follows
+            - an optional phrase is defined with [square brackets] and can
+              contain any signature elements
+              - elements in the group will not be parsed if they aren't all
+                present in the CLI
+            - a grouped phrase is defined with (parentheses) and can contain
+              any signature elements
+              - they have no effect in CLI parsing and only serve to group a
+                set of signature elements into a single element for other
+                expressions where usually a single element is required
+            - a flag is defined with <angle brackets> (less than/greater than)
+              and can contain only keyword elements
+              - if all the keywords are present then the flag will be parsed
+                and a True value will be passed as the input
+              - it is an optional element and its input value will be False if
+                the flag's keywords are not present
+              - the input parameter name of the flag is all the keywords in
+                lowercase, separated by underscores (as: multi_keyword_flag)
+            - a capturing keyword is defined with {curly braces} and can
+              contain only keywords
+              - it is a required element, but a value of True will be passed
+                as the input (with the same naming semantics as a flag)
+              - the only time it will be false is if it appears within an
+                optional/variable phrase
+            - to make an element optional, the character ? can be put after it
+              - this is only for inputs, keywords, flags, captures and normal
+                phrases (not optional phrases)
+              - when the 'optional?' marker is for an input, it goes after the
+                name like 'STRING=name?'
+              - the marker means that the element won't be parsed if it is not
+                present
+              - if used on an input, there should be a default value provided
+                for the input value in the dict Command.defaults
+              - if there is no default given, the corresponding input handler,
+                if it is defined will be called with a value of None
+            - to make a variable element, the character * can be put after it
+              - (follows the same parsing rules as optional markers)
+              - the marker means that the element will be parsed 0 or more
+                times as long as it is still present and can be matched
+              - the value(s) for the input will be passed a list, even if there
+                are 0 or 1 elements
+            - to give a multiple options for 1 element, an OR expression can be
+              used with the pipe character |
+              - this will mean that any option in the expression can be matched
+              - if there are multiple matches, the longest match will be chosen
+              - if there are multiple longest matches, the first one
+                encountered will be chosen
+              - multiple ORs can be chained as option1|option2|option3 etc.
+              - ORs have the lowest precedence so they will bind all elements
+                classed as a singular into each option, including optional and
+                variable markers
+              - to bind multiple elements to one option, use a (grouped phrase)
+- 05/08/20: added a default loader in plugins/loaders.py to load data trees
+            from standard tagger format
+            - loader ID is 'default loader'
+            - chagned plugin.LoadCommand's syntax to:
+              'load \'file \' [using \'loader\']' where the default loader is
+              used if no name given
+- 05/08/20: extended syntax of ExitCommand so that it is now:
+            'exit <and return> <without saving>'
+            - if 'withouts aving' is present, the program will end immediately
+            - if it is not present and there are no unsaved changed, a prompt
+              will appear to confirm
+            - if it is not present and there are unsaved changes, the program
+              will not end
+            - if 'and return' is present, the program will return to the state
+              where no data tree is loaded
+            - these features are not present when the program has no data tree
+              loaded
 
 **clean up files before committing**
 
 IN PROGRESS:
-implementing default commands - ones left to do:
-- edit tag value
-
+None at the moment
 
 NEXT UP:
+None at the moment
 
-
-TODOS:
+TODOS: 
 
 [API and plugins]
 
-- consider adding a 'master' command execution hook so that a plugin can 
+- consider adding a 'master' command execution hook so that a plugin can
   intercept command calls and delegate calls to their custom hooks instead
   of hard-coded hook names (for default commands)
   - commands will need to have IDs
   - this could allow plugins to interact
+
+- make some input sanitation functions for tags (e.g. to remove whitespace)
 
 add back input_handler function and pre-written functions like
 get_yes_or_no from the unseen pre-pre-release version
@@ -291,5 +464,5 @@ get_yes_or_no from the unseen pre-pre-release version
 
 
 [Input-related things]
-- consider having the option to (import from/export to) JSON file as an
-  alternative to the custom file format
+- option to export to JSON file as an alternative to the custom file format
+- loading multiple trees

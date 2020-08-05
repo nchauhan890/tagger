@@ -1,0 +1,82 @@
+{
+  "data": "An Inspector Calls",
+  "tags": {
+    "config": "sample.py",
+    "author": "J. B. Priestley",
+    "description": "A collection of quotes and analysis categorised by character",
+    "written": "1944-45",
+    "set": "1912",
+    "nesting structure": "Characters --> Quotes --> Analysis"
+  },
+  "children": [
+    {
+      "data": "Eric"
+    },
+    {
+      "data": "Sheila"
+    },
+    {
+      "data": "Mr. Birling",
+      "children": [
+        {
+          "data": "\"Nothing to do with you, Sheila. Run Along.\""
+        },
+        {
+          "data": "\"Like some bees in a hive\""
+        },
+        {
+          "data": "\"famous younger generation\"",
+          "tags": {
+            "link": ["Eric", "Sheila"]
+          }
+        }
+      ]
+    },
+    {
+      "data": "Mrs. Birling",
+      "children": [
+        {
+          "data": "\"girls of that class\"",
+          "tags": {
+            "quote": true,
+            "act": "1"
+          },
+          "children": [
+            {
+              "data": "\"that class\" - dismissive",
+              "tags": {
+                "analysis": true
+              }
+            }
+          ]
+        },
+        {
+          "data": "\"I did my duty\"",
+          "tags": {
+            "quote": true,
+            "act": "2"
+          },
+          "children": [
+            {
+              "data": "\"duty\" - as if obliged: no other choice",
+              "tags": {
+                "analysis": true
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "data": "Inspector Goole",
+      "children": [
+        {
+          "data": "\"(impressively)\"",
+          "tags": {
+            "stage direction": true
+          }
+        }
+      ]
+    }
+  ]
+}

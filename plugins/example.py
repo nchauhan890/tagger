@@ -25,7 +25,8 @@ class ShowCommand(api.Command):
     ID = 'show'
 
     def execute(self):
-        print(api.plugin.display_hook(api.tree.current_node))
+        # print(api.plugin.display_hook(api.tree.current_node))
+        pass
 
 
 class ExampleCommand(api.Command):

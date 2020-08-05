@@ -12,6 +12,7 @@ from tagger import lexers
 from tagger import parsers
 
 tree = None
+_saved_trees = []
 registry = {}
 command_queue = []  # the list of current commands that needs to be executed
 post_commands = []  # commands that will be executed after all of the ones
@@ -20,6 +21,7 @@ _log = {
     'unsaved_changes': False,         # the log holds information that is
     'plugin_file': None,              # meant to be accessible to plugins
     'plugin_loaded': False,           # through api.log
+    'commands_loaded': False,
     'warnings_on': False,
     'alternative_plugins_dir': None,  # it will ease certain checks
     'data_source': None,
@@ -27,6 +29,9 @@ _log = {
     'new_hooks': 0,
     'new_commands': 0,
     'importing_commands': False,
+    'disable_exemptions': [],
+    'disabled': [],
+    'disable_all': False
 }
 _hook_names = [
     'pre_node_creation_hook',   # to register a new hook, the easist way is to
@@ -39,6 +44,7 @@ _hook_names = [
     'prompt_string',            # it is possible to add to the list at runtime,
     'inspect_commands',         # but plugins will need to be reloaded for a
     'inspect_post_commands',    # new hook to be registered
+    'capture_return',
 ]
 hooks = dict.fromkeys(_hook_names)
 plugin = structure.NameDispatcher(
@@ -56,13 +62,14 @@ def initialise_plugins(*, reload=False):
     config_base = None
     if log.plugin_file:
         _success, config_base = _import_plugin_file(_success, config_base,
-                                                    reload=True)    
+                                                    reload=True)
     log.importing_commands = True
     _import_other_plugins(config_base, reload=True)
     # import from default plugin directory
     if log.alternative_plugins_dir:
         _import_alt_dir_plugins(config_base)
     log.importing_commands = False
+    log.commands_loaded = True
     startup_message('{} command{} registered, {} hook{} overridden'.format(
         log.new_commands, '' if log.new_commands == 1 else 's',
         log.new_hooks, '' if log.new_hooks == 1 else 's'
@@ -158,7 +165,7 @@ def _import_base_plugin(*, reload=False):
     startup_message('Registered default plugin hooks')
     startup_message('Registered default commands\n')
 
-
+    
 def reload_plugins(*, clean=False):
     """Reload all plugins if a plugin file was updated."""
     global registry
@@ -172,6 +179,12 @@ def reload_plugins(*, clean=False):
         log.plugin_file = tree.root.tags.get('config', log.plugin_file)
         # attempt to update the plugin config using the data tree
     initialise_plugins(reload=True)
+
+
+def found_plugin_file(file, *, reload=True):
+    """Set the plugin file and initialise plugins."""
+    log.plugin_file = file
+    initialise_plugins(reload=reload)
 
 
 def startup_message(message):
@@ -207,7 +220,7 @@ def may_return_none(func):
     """Decorator for input handlers that might purposefully return None."""
     func.may_return_none = True
     return func
-    
+
 
 class ProgramExit(Exception):
     """Raised to quit program."""
@@ -232,14 +245,19 @@ class APIWarning(UserWarning):
 class Tree:
     """Hold the data tree."""
 
-    def __init__(self, source):
-        """Initialise a data tree from a source string."""
-        self.parser = parsers.InputPatternParser(lexers.InputLexer(source))
-        self.root = parsers.construct_tree(self.parser)
+    def __init__(self, root):
+        """Initialise a data tree from a root object."""
+        self.root = root
         self.current_node = self.root
         self.traversal_numbers = []
         # [int]* : the indexes to get from the root to the current
         # by root.children[t[0]].children[t[1]].children[t[2]] etc.
+
+    @classmethod
+    def from_parser(cls, source):
+        parser = parsers.InputPatternParser(lexers.InputLexer(source))
+        root = parsers.construct_tree(parser)
+        return cls(root)
 
 
 def enter_node(index):
@@ -379,6 +397,8 @@ def edit_tag_value(tag, new_value, node=None, create=False):
     except KeyError:
         if not create:
             raise NodeError(f'tag \'{tag}\' not found')
+    if isinstance(new_value, list) and not new_value:
+        new_value = None
     new_tag(tag, new_value, node)
 
 
@@ -392,6 +412,8 @@ def new_tag(tag, value=None, node=None):
     """
     if node is None:
         node = tree.current_node
+    if isinstance(value, list) and not value:
+        value = None
     if not plugin.tag_name_input_test(node, None, tag):
         raise NodeError(f'invalid tag name {tag}')
     tag = plugin.tag_name_hook(node, tag, tag)
@@ -425,19 +447,18 @@ def append_tag_value(tag, new_value, node=None, create=False):
             new_tag(tag, new_value, node)
             return
         raise NodeError(f'tag \'{tag}\' not found')
-    if not plugin.tag_value_input_test(node, tag,
-        node.tags[tag], new_value):
+    if not plugin.tag_value_input_test(node, tag, node.tags[tag], new_value):
         raise NodeError(f'invalid tag value {new_value}')
     new_value = plugin.tag_value_hook(
         node, tag, node.tags[tag], new_value
     )
-    if new_value == None:
+    if new_value is None:
         warning('cannot append None value')
-    elif isinstance(current, list) and new_value != None:
+    elif isinstance(current, list):
         current.append(new_value)
-    elif current != None and new_value != None:
+    elif current is not None:
         node.tags[tag] = [current, new_value]
-    elif current == None and new_value != None:
+    elif current is None:
         node.tags[tag] = new_value
     else:
         raise NodeError('cannot append tag value')
@@ -497,14 +518,19 @@ def make_tree(source=None, file=None, overwrite=True):
             'tree already created; use api.make_tree(source, overwrite=True) '
             'to overwrite and stop warning'
         )
-    if source is None:
-        if not file:
-            file = log.data_source
-        if not file:
-            raise TypeError('no data source')
-        with open(file, 'r') as f:
-            source = f.read()
-    tree = Tree(source)
+    try:
+        if source is None:
+            if not file:
+                file = log.data_source
+            if not file:
+                raise TypeError('no data source')
+            with open(file, 'r') as f:
+                source = f.read()
+    except TypeError as e:
+        if str(e) != 'no data source':
+            raise
+    else:
+        tree = Tree.from_parser(source)
     log.unsaved_changes = False
     # the construction will call API functions so this must be reset to False
 
@@ -512,35 +538,70 @@ def make_tree(source=None, file=None, overwrite=True):
 def run():
     """Run the traversal command line interface."""
     if tree is None:
-        raise NodeError('no data tree created; use api.make_tree(source)')
+        prev = log.is_startup
+        log.is_startup = True
+        initialise_plugins()  # they will not have been initialised
+        # because the parser would have usually done this when constructing
+        # the data tree (no source so no tree being loaded)
+        log.is_startup = prev
+    error_count = 0
     while True:
         try:
+            if error_count > 200:
+                print('More than 200 errors have occured. There may be an '
+                      'issue.\nType \'continue\' to continue else exit')
+                if input().strip().lower() == 'continue':
+                    error_count = 0
+                elif log.unsaved_changes:
+                    _generate_commands('save and exit')
+                    # run the save command to the default 'output.txt' and exit
+                else:
+                    raise ProgramExit
             prompt()
         except NodeError as e:
+            error_count += 1
             print('\nError whilst executing command:', e)
         except CommandError as e:
+            error_count += 1
             # raise
             print('\nError whilst processing command:', e)
         except InputError as e:
+            error_count += 1
             print('\nError whilst processing input:', e)
         except SyntaxError as e:
+            error_count += 1
             # raise
             print('\nError whilst parsing command:', e)
         except APIWarning as e:
+            error_count += 1
             print('API Warning:', e)
         except ProgramExit:
             break
+        except Exception:
+            if tree is not None and log.unsaved_changes:
+                log.disable_exemptions.append('save')
+                # try to save data before crashing from another error
+                _generate_commands('save and exit')
+            raise
 
 
 def prompt():
     """Read CLI input."""
     if tree is None:
-        raise NodeError(
-            'no data tree created; use api.make_tree(source)'
-        )
-    print(plugin.display_hook(tree.current_node))
-    print(plugin.prompt_string(tree.current_node), end='')
-    return _generate_commands(input())
+        prev = log.disable_all, log.disable_exemptions, log.unsaved_changes
+        log.disable_all = True
+        log.disable_exemptions = ['help', 'load', 'exit', 'reload', 'set']
+        log.unsaved_changes = False
+        print('\nNo data tree - use the \'load\' command to load a tree')
+        print(plugin.prompt_string(), end='')
+        r = _generate_commands(input())
+        log.disable_all, log.disable_exemptions, log.unsaved_changes = prev
+    else:
+        print(plugin.display_hook(tree.current_node))
+        print(plugin.prompt_string(tree.current_node), end='')
+        r = _generate_commands(input())
+    plugin.capture_return(r)
+    return r
 
 
 def _generate_commands(command_str):
@@ -551,14 +612,17 @@ def _generate_commands(command_str):
     commands = plugin.inspect_commands(commands)
     print(commands, end='\n\n')
     command_queue.extend(commands)
+    return_values = []
     while command_queue:
         # use while loop, because commands may add to the queue themselves
         c = command_queue.pop(0)
-        execute_command(c)
+        return_values.append((c.ID, execute_command(c)))
     plugin.inspect_post_commands(post_commands)
     while post_commands:
-        execute_command(post_commands.pop(0))
+        c = post_commands.pop(0)
+        return_values.append((c.ID, execute_command(c)))
     print()
+    return return_values
 
 
 def execute_command(command):
@@ -608,7 +672,6 @@ def execute_command(command):
     try:
         return command.execute(**inputs)
     except TypeError as e:
-        raise
         if str(e).startswith('execute()'):
             # this should only match TypeError arising from the wrong
             # number of inputs given to the command
@@ -663,7 +726,7 @@ def resolve_command(name):
     return value: Command subclass instance
     """
     try:
-        return registry[name]()
+        return registry[name.lower()]()
     except KeyError:
         raise CommandError(f'unknown command \'{name}\'')
 
@@ -676,7 +739,13 @@ def is_disabled(command):
     return: bool
     """
     if isinstance(command, type):
-        command = command()  # instantiate if subclass passed
+        command = command()  # instantiate if subclass given
+    if command.ID in log.disable_exemptions:
+        return False
+    if log.disable_all:
+        return True
+    if command.ID in log.disabled:
+        return True
     return command.disabled()
 
 
@@ -711,7 +780,7 @@ def fill_missing_args(command, args):
     _lex = lexers.SignatureLexer(resolve_signature(command))
     _par = parsers.SignatureParser(_lex, command.ID)
     inputs = (parsers.CLIParser(lexers.CLILexer(''))
-             .scan_for_inputs_or_flags(_par.make_signature()))
+              .scan_for_inputs_or_flags(_par.make_signature()))
     inputs.update(command.defaults.copy())
     inputs.update(args)
     return inputs

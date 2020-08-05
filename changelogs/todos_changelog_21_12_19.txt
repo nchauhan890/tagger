@@ -1,3 +1,5 @@
+TODOs and Changelog from 21/12/19
+
 CHANGELOG:
 [FORMAT: - dd/mm/yy: change + info]
 some entries marked with an asterisk may have changed
@@ -15,7 +17,7 @@ some entries marked with an asterisk may have changed
                 separated, but they will be added to the input queue
                 [CHANGED ON 01/01/20]
                 [DEPRECATED ON 22/01/20]
-- 28/12/19: changed 'edit tag name of 'name'' to 'edit tag name 'name''
+- 28/12/19: changed 'edit tag name of \'name\'' to 'edit tag name \'name\''
 - 28/12/19: added '[of n]' suffix to both tag editing commands
 - 29/12/19: implemented base API functions (e.g. api.Tree.remove_node)
 - 31/12/19: implemented the rest of the plugin hooks and input handlers in
@@ -52,7 +54,7 @@ some entries marked with an asterisk may have changed
 - 14/01/20: split tag name/value editing into 2 separate commands
               - each command now will take the tag name as an input, not
                 a part of the syntax
-- 14/01/20: changed the parser so numbers, strings or literal inputs are 
+- 14/01/20: changed the parser so numbers, strings or literal inputs are
         **  all accepted under literal input
             [DEPRECATED ON 22/01/20]
 - 14/01/20: return command now changed to 'return n' [n is optional input]
@@ -193,7 +195,7 @@ some entries marked with an asterisk may have changed
             - higher priority means it will be checked first
 - 30/01/20: re-implemented 'remove [n]' with new input checking and signature
             parsing
-- 30/01/20: implemented 'new data at n [in n] 'data'' command
+- 30/01/20: implemented 'new data at n [in n] \'data\'' command
             - this command uses the input handler priority check to validate
               'data' and 'node' before 'position'
 - 31/01/20: changed main.py to __main__.py and data source is now sys.argv[1]
@@ -211,7 +213,7 @@ some entries marked with an asterisk may have changed
         **  that is/will become a list
             [IMPLEMENTED ON 27/02/20]
 - 07/02/20: added api.Tree.new_tag and api.Tree.append_tag_value
-- 07/02/20: implemented 'new tag [in n] 'name' 'value?''
+- 07/02/20: implemented 'new tag [in n] \'name\' \'value?\''
 - 07/02/20: added tests.is_valid_child_index(node, true_index=False) to check
             if a numerical input could be used as an index of a child node
         **  - true_index shifts the test values down by 1, so it treats the
@@ -237,8 +239,9 @@ some entries marked with an asterisk may have changed
             a signature:
             - to indicate whether disabled, create another method that
               return True (disabled) or False
-            - this method must be a classmethod (use @classmethod decorator)
+      **     - this method must be a classmethod (use @classmethod decorator)
               or staticmethod
+            [CHANGED ON 02/03/20]
 - 11/02/20: command IDs can now be multiple words (space separated) e.g.
             the 'edit tag value' command
             - the pre-existing multi-word commands are no longer hard-coded
@@ -376,7 +379,7 @@ some entries marked with an asterisk may have changed
 - 27/02/20: added example.py and default.py to contain the respective commands
 - 27/02/20: the attribute Command.__doc__ or Command.description will be used
             by the help command as an additional piece of information
-- 27/02/20: SaveCommand now has updated syntax 'save [as 'name']'
+- 27/02/20: SaveCommand now has updated syntax 'save [as \'name\']'
         **  - will save as the given name in the directory of the data source
             - a prompt for overwrite will display if the given name already
               exists
@@ -452,7 +455,7 @@ TODO:
 
 [API and plugins]
 
-- consider adding a 'master' command execution hook so that a plugin can 
+- consider adding a 'master' command execution hook so that a plugin can
   intercept command calls and delegate calls to their custom hooks instead
   of hard-coded hook names (for default commands)
   - commands will need to have IDs

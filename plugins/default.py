@@ -1,12 +1,8 @@
 """Default commands for tagger API."""
 
-import os
 import copy
 
 from tagger import api
-from tagger import structure
-from tagger import lexers
-from tagger import parsers
 
 
 class EnterCommand(api.Command):
@@ -27,7 +23,7 @@ class EnterCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         api.test_input(num, 'current node does not have any entries', bool)
         return int(i)
@@ -54,13 +50,15 @@ class EnterCommand(api.Command):
 class ReturnCommand(api.Command):
 
     ID = 'return'
-    signature = 'NUMBER=depth?'
+    signature = 'NUMBER=depth?|<home>'
     defaults = {'depth': 1}
     description = 'return to the parent node'
 
-    def execute(self, depth):
+    def execute(self, depth, home):
         if not hasattr(api.tree.current_node, 'parent'):
             raise api.NodeError('current node is the root of the tree')
+        if home:
+            depth = api.tree.current_node.depth
         for _ in range(depth):
             api.return_from_node()
 
@@ -94,11 +92,11 @@ class RemoveCommand(api.Command):
                        api.tests.integer)
         i = int(i)
         api.test_input(i, 'index of node must be greater than 0',
-                   api.tests.greater_than(0))
+                       api.tests.greater_than(0))
         num = len(api.tree.current_node.children)
         api.test_input(num, 'current node does not have any entries', bool)
         api.test_input(i, 'index of node must not exceed {}'.format(num),
-                   api.tests.less_equal(num))
+                       api.tests.less_equal(num))
         return i
 
 
@@ -136,7 +134,7 @@ class NewDataCommand(api.Command):
         api.test_input(
             i, ['position must be an integer', 'position must be greater '
                 'than 0', 'position must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -145,13 +143,13 @@ class NewDataCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
     def input_handler_data(self, i):
         api.test_input(i, 'data cannot be empty', api.tests.not_whitespace,
-                   bool)
+                       bool)
         return i
 
 
@@ -189,7 +187,7 @@ class NewTagCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -218,7 +216,7 @@ class RemoveTagCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -243,7 +241,7 @@ class EditDataCommand(api.Command):
 
     def input_handler_data(self, i):
         api.test_input(i, 'data cannot be empty', api.tests.not_whitespace,
-                   bool)
+                       bool)
         return i
 
     def input_handler_node(self, i):
@@ -252,7 +250,7 @@ class EditDataCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'node index must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -283,7 +281,7 @@ class EditTagNameCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'node index must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
@@ -312,7 +310,36 @@ class EditTagValueCommand(api.Command):
     def signature(self):
         if api.tree.current_node.children:
             return '[of NUMBER=node] STRING=tag STRING=value*'
+            # there can be no value - just a name-only tag
         return 'STRING=tag STRING=value*'
+
+    def execute(self, tag, value, node):
+        if self.inputs['node'] is None:
+            node = api.tree.current_node
+        else:
+            node = api.tree.current_node.children[self.inputs['node']]
+        if not value:  # empty
+            value = None
+        api.edit_tag_value(tag, value, node=node)
+
+    @api.priority(1)
+    def input_handler_node(self, i):
+        num = len(api.tree.current_node.children)
+        api.test_input(
+            i, ['node index must be an integer', 'node index must be greater '
+                'than 0', 'index of node must not exceed {}'.format(num)],
+            *api.tests.is_valid_child_index(num)
+        )
+        return int(i)
+
+    def input_handler_tag(self, i):
+        if self.inputs['node'] is None:
+            node = api.tree.current_node
+        else:
+            node = api.tree.current_node.children[self.inputs['node']]
+        if i not in node.tags:
+            raise api.InputError('tag \'{}\' not found'.format(i))
+        return i
 
 
 class AppendTagValueCommand(api.Command):
@@ -339,13 +366,14 @@ class AppendTagValueCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         return int(i)
 
     def input_handler_tag(self, i):
-       api.test_input(i, 'tag cannot be empty', api.tests.not_whitespace, bool)
-       return i
+        api.test_input(i, 'tag cannot be empty',
+                       api.tests.not_whitespace, bool)
+        return i
 
 
 class InCommand(api.Command):
@@ -368,7 +396,7 @@ class InCommand(api.Command):
         api.test_input(
             i, ['node index must be an integer', 'node index must be greater '
                 'than 0', 'index of node must not exceed {}'.format(num)],
-           *api.tests.is_valid_child_index(num)
+            *api.tests.is_valid_child_index(num)
         )
         api.test_input(num, 'current node does not have any entries', bool)
         return int(i)

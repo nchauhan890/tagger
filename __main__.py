@@ -5,6 +5,8 @@ import argparse
 
 from tagger import api
 
+sys.setrecursionlimit(250)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Python program to manipulate data: traverse and tag using'
@@ -16,7 +18,7 @@ if __name__ == '__main__':
             'information'
     )
     parser.add_argument('-d', '--data', help='data source to parse',
-                        required=True, metavar='FILE')
+                        default=None, metavar='FILE')
     parser.add_argument('-p', '--plugins', metavar='DIR',
                         help='alternative location to look for plugins')
     parser.add_argument('-w', '--warnings', action='store_true',

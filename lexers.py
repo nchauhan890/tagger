@@ -1,7 +1,6 @@
 """Lexers for data input, CLI and command signatures."""
 
-from string import (ascii_letters, digits, whitespace, ascii_uppercase,
-                    ascii_lowercase)
+from string import ascii_letters, digits, whitespace
 
 text_chars = ascii_letters + digits + '\'\\¦,.<>/?;:@#~[]{}=+-_!"£€`¬$%^&*()'
 string_chars = text_chars + whitespace
@@ -29,15 +28,17 @@ STRING = 'STRING'
 KEYWORD = 'KEYWORD'
 SEMICOLON = 'SEMICOLON'  # to separate commands
 # for command signatures:
-LBRACKET = 'LBRACKET'
+LBRACKET = 'LBRACKET'  # optional signature phrase
 RBRACKET = 'RBRACKET'
+LBRACE = 'LBRACE'      # capture keyword
+RBRACE = 'RBRACE'
 OPTIONAL = 'OPTIONAL'
 VARIABLE = 'VARIABLE'
 ARGUMENT = 'ARGUMENT'  # in signatures 'NUMBER=index' where argument is =index
 LESS = 'LESS'
 GREATER = 'GREATER'
 OR = 'OR'
-LPAREN = 'LPAREN'
+LPAREN = 'LPAREN'      # non-capture, for grouping only
 RPAREN = 'RPAREN'
 EOF = 'EOF'
 
@@ -45,6 +46,8 @@ EOF = 'EOF'
 _single_char_conversion = {  # helper lookup table to make it faster to
     '[': LBRACKET,           # convert elements that are only a single
     ']': RBRACKET,           # character long
+    '{': LBRACE,
+    '}': RBRACE,
     '?': OPTIONAL,
     '*': VARIABLE,
     '<': LESS,
@@ -252,9 +255,7 @@ class SignatureLexer(LexerBase):
             return Token(ARGUMENT, self.argument())
         elif char in _single_char_conversion:
             return Token(_single_char_conversion[char], self.advance())
-        elif char in ascii_uppercase:
-            return self.collect_text(upper=True)
-        elif char in ascii_lowercase + '_':
+        elif char in ascii_letters + '_':
             return self.collect_text()
         self.raise_error(f'invalid character \'{char}\' in command')
 
@@ -263,17 +264,16 @@ class SignatureLexer(LexerBase):
             self.advance()
         return self.current
 
-    def collect_text(self, upper=False, argument=False):
+    def collect_text(self, argument=False):
         r = ''
-        letters = (ascii_uppercase if upper
-                   else ascii_lowercase + digits + '_')
+        letters = ascii_letters + digits + '_'
         while self.current and self.current in letters:
             # treat separate words as separate tokens, but allow numbers
             # within the word (not as the start character)
             r += self.advance()
         if argument:
             return r
-        if upper and r in ('NUMBER', 'STRING'):
+        if r in ('NUMBER', 'STRING'):
             token = Token(r, r)  # these literals have to be uppercase
         else:
             token = Token(KEYWORD, r.lower())  # only commands as lowercase
