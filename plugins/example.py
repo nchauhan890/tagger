@@ -3,8 +3,12 @@
 from tagger import api
 
 
-def startup_hook():
-    print('example startup hook')
+class Hooks(api.Hooks):
+    def startup_hook():
+        print('example startup hook')
+
+    def custom_hook():
+        print('custom hook used')
 
 
 class ShowChildrenCommand(api.Command):
@@ -56,7 +60,21 @@ class MutuallyExclusiveFlagCommand(api.Command):
     signature = '<one>|<two three>'
 
 
-class MakeTag(api.Command):
+class CustomHookDemoCommand(api.Command):
 
-    ID = 'tag'
-    signature = 'STRING=data'
+    ID = 'hook demo'
+
+    def execute(self):
+        api.plugin.custom_hook()
+
+
+class NodeReferenceCommand(api.Command):
+
+    ID = 'node ref'
+    signature = 'NODEREF/forward=node'
+
+    def execute(self, node):
+        print(node)
+
+
+api.register_hook('custom_hook', single=True, default=Hooks.custom_hook)

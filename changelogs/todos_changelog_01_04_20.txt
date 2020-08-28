@@ -181,9 +181,10 @@ what's changed between releases
             api.log.new_hooks and api.log.new_commands
             - this records how many commands have been registered and how many
               hooks have been overriden (excluding the default hooks)
-- 14/04/20: moved api._importing_commands to api.log.importing commands which
-            is a boolean value indicating whether to only register commnads
+- 14/04/20: moved api._importing_commands to api.log.importing_commands which
+        **  is a boolean value indicating whether to only register commnads
             (and not hooks) from plugin files (at startup)
+            [RENAMED ON 17/08/20]
 - 14/04/20: added api.reload_plugins and command 'reload <verbose>' which is
             found in plugin.ReloadCommand (command comes with the program)
             [FINISHED ON 04/06/20]
@@ -195,8 +196,9 @@ what's changed between releases
 - 04/06/20: fixed reload system to force reload by removing modules from
             sys.modules
 - 04/06/20: all plugin files can now have a startup_hook() function in their
-            namespace (NOT within an api.Hooks subclass) which will be called
+        **  namespace (NOT within an api.Hooks subclass) which will be called
             as soon as the plugin is loaded
+            [CHANGED ON 17/08/20]
 - 04/06/20: added 'and clean' flag to 'reload' command:
             - signature is now 'reload <and clean> <verbose>'
             - the presence of this flag will remove any commands that are no
@@ -282,7 +284,8 @@ what's changed between releases
             - it should only be used by LoadCommand and not directly
             - it loads data in JSON format (see tagger.sample_data.json)
 - 26/07/20: added api.found_plugin_file(file, reload=True) which will set
-            api.plugin_file to the file path and reload plugins
+        **  api.plugin_file to the file path and reload plugins
+            [CHANGED ON 07/08/20]
 - 26/07/20: finished the loading mechanism to manually load a data tree from
             a source in a different format
         **  - plugin.LoadCommand has the syntax:
@@ -416,16 +419,195 @@ what's changed between releases
               where no data tree is loaded
             - these features are not present when the program has no data tree
               loaded
+[COMMITED ON 05/08/20]
+- 07/08/20: changed the loader interface so that a dedicated api.Loader
+            subclass can be created with the methods 'load' and 'save'
+            - the 'load' method should accept a string which is the path to the
+              file to load
+            - the 'save' method should accept a string which is the file to
+              save the data tree to
+            - Loader subclasses should have an ID attribute like commands
+- 07/08/20: moved api.found_plugin_file to api.Loader.found_plugin_file as it
+            is only used in loaders
+- 07/08/20: renamed 'json loader' and 'default loader' to 'json' and 'default'
+- 07/08/20: moved default saving functions to the default loader and added
+            a .save method for the JSON loader too
+- 07/08/20: changed behaviour of structure.NameDispatcher and added subclass
+            .PluginHookDispatcher to facilitate calls to multiple hooks from
+            one name
+            - structure.NameDispatcher accepts a dispatch reference, a getter
+              hook and a setter hook in __init__
+            - getter_hook is a function called with the reference, the key and
+              the value retreived (used in __getattribute__)
+            - setter_hook is a function called with the same arguments (used
+              in __setatttr__)
+            - getter_hook should return a value which is the return value of
+              the lookup
+            - setter_hook should return a value which is used as the new value
+            - structure.warn_if_new(message) will return a function used as a
+              setter hook that raises an API warning if assigning to a new name
+            - structure.error_if_test(test, message) will return a function
+              used as a getter hook that calls the test function with the value
+              (if the test returns True, TypeError is raised)
+- 13/08/20: changing plugins so that certain names can have multiple hooks
+            - starting to redesign the plugin hook system so all 'files' are
+              'plugin files' and all can define hooks, but for certain hooks,
+              only the hook from the designated plugin file will be used
+- 13/08/20: 'plugin.startup_hook' should now be defined under an api.Hooks
+            subclass
+            - it is called as soon as it is registered
+- 13/08/20: 'tag_name_input_test' and 'tag_value_input_test' should now not
+            return a value and instead raise TypeError so that the default
+            error is raise (where there is an invalid value) or NodeError
+            if a custom error message is to be used
+- 13/08/20: api.log.importing_commands renamed to .importing_main_plugin
+            to better describe the meaning
+            - when True, it means the main plugin file is being registered
+- 19/08/20: added api.register_hook(hook, *, single=False) which can be called
+            by plugins to register new hooks
+            - 'single' means that the hook is only for the main plugin file
+        **  - if 'single' is True, a default hook value should be registered
+              to avoid errors
+            [IMPLEMENTED METHOD ON 21/08/20]
+- 19/08/20: added api.log.currently_importing which is either None or the
+            name of the plugin file currently being imported
+- 19/08/20: calling the 'reload' command will clear all registered plugins so
+            that no duplicates are created when new hooks are re-registered
+            - the 'and clean' option will only clean the command registry
+- 21/08/20: extended api.register_hoook to register_hook(hook, *, single=False,
+            default=None)
+            - 'default' must be provided as the default hook (function) if
+              'single' is True
+- 23/08/20: started to implement Node Reference input type into command
+            signatures
+            - lexers.NODEREF token type added
+            - lexers.DOT token type added
+            - lexers.DOTDOT token type added
+            - lexers.TILDE token type added
+            - lexers.SLASH token type added
+            - NODEREF keyword required in command signatures
+            - structure.NodeRefInput added to handle parsing
+- 23/08/20: changed api.resolve_child to handle negative indices correctly
+            - in normal mode, positive indices begin from 0 and negative
+              indices begin from -1
+            - in offset mode, positive indices start from 1 and negative
+              indices start from -1
+- 23/08/20: added Node.id attribute which is set/updated with
+            NodeType.update_id() - it is set as follows:
+            - node data used as base
+            - only digits and characters kept from node's data
+            - all characters made lowercase
+            - all words separated by underscores
+            - the minimum length is 6 characters (unless data is less than
+              6 characters long)
+            - once 6 character length is reached, the current word will be
+              the last part of the ID and the rest are omitted
+            - if it starts with a digit, an underscore prefix is added
+            - if another node (sibling) has the same ID, an underscore suffix
+              is added to the end (as many as needed to get a unique ID)
+            - .update_id() should be called whenever a node's data is changed
+              or created or moved (api.edit_data calls it) and it is called
+              in Node/Root.__init__
+- 23/08/20: added 'what id' extension to 'what' command to show current node ID
+- 24/08/20: the syntax for node references is as follows:
+            - references start with either a dot, double dot, tilde, slash,
+              keyword or number:
+              - dot (.): reference starts with the current node
+              - double dot (..): reference starts with the parent node
+              - tilde (~): reference starts with the root node
+              - slash (/): reference starts witht the current node (implied
+                           starting dot)
+              - keyword: reference starts with node with matching ID in
+                         current node's list of children
+              - number: reference starts with the node with the given index
+                        in the current node's list of children (starting at 1)
+            - references can refer to child nodes of the first node, each one
+              separated by a slash
+            - the following references can contain a double dot, keyword or
+              number which behave as listed above but the 'current node' is
+              treated as the previous node in the reference
+- 24/08/20: added STAR (*) token to CLI input which can be used to handle
+            parsing problems - it will be parsed silently
+            - for example, if there is a command 'edit tag value' and a command
+              'edit tag' whose signature begins with a keyword(-like) element
+              with the value 'value', the command 'edit tag value' will be
+              chosen if 'edit tag value' is typed into the CLI
+            - however, if 'edit tag * value' is typed, 'edit tag' command will
+              be chosen
+            - a star can occur after the command name or between signature
+              elements
+            - for example, if a signature contains
+              'STRING=input1* STRING=input2' and 2 strings are entered into the
+              CLI, both will be consumed by the first input since it is a
+              variable element (and parsed greedily)
+            - however, typing 'string' * 'string' will cause the parser to stop
+              parsing the 2nd string as the first input
+- 24/08/20: added api.switch_node(node) which will move traversal into the
+            given node
+- 26/08/20: structure.InputType adds subclasses to structure._inputs
+            [dict(token: class)] to indicate the given keyword (uppercase)
+            should be treated as an input and not a keyword by the
+            signature lexer
+- 26/08/20: lexers.SignatureLexer will now produce an INPUT token instead
+            of the previous STRING, NUMBER and NODEREF tokens so custom
+            input types can be added
+            - the token value will be the name of the input e.g. 'STRING'
+            - all uppercase names that appear in signatures will be converted
+              to lowercase as before unless they are in structure._inputs
+- 26/08/20: all input elements in command signatures must be a subclass of
+            structure.InputType
+            - they should have a .type attribute which is the value of the
+              INPUT token produced by the signature lexer that matches the
+              class
+- 26/08/20: added 'input options' to command signatures:
+            - input tokens can have a slash followed by a single keyword
+              indicating an option - e.g. 'NODEREF/child=node'
+            - options should be a .options [list/tuple] attribute in the
+              structure.InputType subclass that implements the parsing
+            - the .option attribute will be set to the option (or None) if
+              the option is specified in a command signature
+            - input options only affect parsing of numbers so input_handlers
+              should still perform checks if the command is called manually
+- 26/08/20: api.tree.traversal_numbers removed as it is now obsolete, with
+            Node.id having repalced it
+            - api.return_from_node no longer returns the index of the child
+            - changed default plugin.display_hook to use node IDs instead of
+              node references as the first line
+- 26/08/20: added input options 'positive' and 'negative' for NumberInput
+            - positive: numbers 0 or more (0 is included)
+            - negative: less than 0
+- 26/08/20: added input options 'forward' and 'child' for NodeRefInput
+            - forward: references have to be within child nodes
+              - double dot .. is not allowed here and it cannot begin with the
+                tilde (~) character
+            - child: references have to be a single child node and cannot go
+                     any deeper
+              - only a single number or keyword (node ID) is allowed
+              - it may start with ./
+- 26/08/20: changed HelpCommand.signature_syntax so that each signature element
+            has its own implementation of .signature_syntax in its class body
+            - added '<node>' for NodeRefInput.signature_syntax
+- 27/08/20: added api.tests.is_child_reference and .is_forward_reference
+            which can check if references [node] comply to 'child' and
+            'forward' options
+- 27/08/20: added api.tests.is_keyword which checks if the keyword contains
+            only digits, characters or underscores (no leading digits)
+- 27/08/20: added api.child_index_from_node(node) which will return what index
+            in the parent's child list the node is
+            - raises NodeError if the node is the root node
+
+
 
 **clean up files before committing**
 
 IN PROGRESS:
-None at the moment
+search command 24/08/20
 
 NEXT UP:
-None at the moment
+- add search option
+- add backward references or absolute references from root
 
-TODOS: 
+TODOS:
 
 [API and plugins]
 
@@ -446,7 +628,6 @@ get_yes_or_no from the unseen pre-pre-release version
 
 [Commands-related things]
 - add float/drop/copy commands
-- add search option
 
 - make the 'in' command safe for use with any command that may call
   api.Tree.return_from_node
@@ -458,11 +639,9 @@ get_yes_or_no from the unseen pre-pre-release version
 - dot parsing in command signatures (e.g. 2.1.3) and check if node.node.node is
   a valid or child that exists
 
-- add backward references or absolute references from root
 - in api.manual_execute, add options to queue the command in command_queue or
   post_commands (with index)
 
 
 [Input-related things]
-- option to export to JSON file as an alternative to the custom file format
 - loading multiple trees

@@ -1,7 +1,9 @@
 """API to perform base functions of data traversal."""
 
 import os
+import os.path
 import sys
+import copy
 import importlib
 import importlib.util
 from functools import wraps
@@ -14,6 +16,7 @@ from tagger import parsers
 tree = None
 _saved_trees = []
 registry = {}
+loaders = {}
 command_queue = []  # the list of current commands that needs to be executed
 post_commands = []  # commands that will be executed after all of the ones
                     # in command_queue have finished (used for InCommand)
@@ -28,67 +31,86 @@ _log = {
     'is_startup': False,
     'new_hooks': 0,
     'new_commands': 0,
-    'importing_commands': False,
+    'new_loaders': 0,
+    'importing_main_plugin': False,
     'disable_exemptions': [],
     'disabled': [],
-    'disable_all': False
+    'disable_all': False,
+    'currently_importing': None,
 }
-_hook_names = [
-    'pre_node_creation_hook',   # to register a new hook, the easist way is to
-    'post_node_creation_hook',  # add the name to this list and add the call
-    'tag_name_hook',            # somewhere in the API
-    'tag_name_input_test',
-    'tag_value_hook',           # hooks won't be registered if the name isn't
-    'tag_value_input_test',     # in this list
-    'display_hook',
-    'prompt_string',            # it is possible to add to the list at runtime,
-    'inspect_commands',         # but plugins will need to be reloaded for a
-    'inspect_post_commands',    # new hook to be registered
-    'capture_return',
-]
-hooks = dict.fromkeys(_hook_names)
-plugin = structure.NameDispatcher(
-    hooks,
-    warn='assigned to new hook name: ',
-    error_if_none='default plugin file may not have been '
-                  'registered as fallback'
+_hook_names = {
+    'pre_node_creation_hook': None,  # hooks won't be registered if not in
+    'post_node_creation_hook': [],   # this list
+    'tag_name_hook': None,
+    'tag_name_input_test': [],       # a None value means only 1 hook can be
+    'tag_value_hook': None,          # registered (the main plugin file)
+    'tag_value_input_test': [],
+    'display_hook': None,            # an empty list means multiple plugins can
+    'prompt_string': None,           # register this hook
+    'inspect_commands': [],
+    'inspect_post_commands': [],     # return values of multiple-function
+    'capture_return': [],            # hooks will be discarded
+    'startup_hook': [],
+}
+
+
+def _initialise_plugin():
+    return structure.PluginHookDispatcher(
+        copy.deepcopy(_hook_names),
+        setter_hook=structure.warn_if_new('assigned to new hook name: '),
+        getter_hook=structure.error_if_test(
+            lambda x: x is None,
+            'default hook may not have been registered as fallback: '
+        )
+    )
+
+
+plugin = _initialise_plugin()
+log = structure.NameDispatcher(
+    _log, setter_hook=structure.warn_if_new('assigned to new log name: ')
 )
-log = structure.NameDispatcher(_log, warn='assigned to new log name: ')
 
 
 def initialise_plugins(*, reload=False):
     """Try to load a plugin file and register command files."""
     _success = True
     config_base = None
+    Hooks.pending_hooks = {}
     if log.plugin_file:
+        log.importing_main_plugin = True
         _success, config_base = _import_plugin_file(_success, config_base,
                                                     reload=True)
-    log.importing_commands = True
+    log.importing_main_plugin = False
     _import_other_plugins(config_base, reload=True)
     # import from default plugin directory
     if log.alternative_plugins_dir:
         _import_alt_dir_plugins(config_base)
-    log.importing_commands = False
     log.commands_loaded = True
-    startup_message('{} command{} registered, {} hook{} overridden'.format(
-        log.new_commands, '' if log.new_commands == 1 else 's',
-        log.new_hooks, '' if log.new_hooks == 1 else 's'
-    ))
+    log.currently_importing = None
+    _append_floating_hooks()
+    startup_message(
+        '{} command{} registered, {} loader{} registered, {} hook{} registered'
+        .format(
+            log.new_commands, '' if log.new_commands == 1 else 's',
+            log.new_loaders, '' if log.new_loaders == 1 else 's',
+            log.new_hooks, '' if log.new_hooks == 1 else 's'
+        )
+    )
     if not _success:
-        warning(f'could not register plugin file \'{log.plugin_file}\'')
+        warning(f'could not register main plugin file \'{log.plugin_file}\'')
 
 
 def _import_plugin_file(_success, config_base, *, reload=False):
     """Import the plugin file from the default or alternative directory."""
     config_base = log.plugin_file.rsplit('.', 1)[0]
+    log.currently_importing = os.path.basename(log.plugin_file)
     # the plugin file without the (presumed) .py extension
     try:
         name = f'tagger.plugins.{config_base}'
         if (reload and importlib.util.find_spec(name) is not None
               and name in sys.modules):
             del sys.modules[name]  # delete current version to allow reload
-        m = importlib.import_module(name)
-        call_startup_hook(m)
+        importlib.import_module(name)
 
     except ModuleNotFoundError:
         spec = None
@@ -105,13 +127,12 @@ def _import_plugin_file(_success, config_base, *, reload=False):
                     module = importlib.util.module_from_spec(spec)
                     sys.modules[config_base] = module
                     spec.loader.exec_module(module)
-                    call_startup_hook(module)
             except FileNotFoundError:
                 _success = False
         else:
             _success = False
     if _success:
-        startup_message(f'Registered plugin file \'{config_base}\'\n')
+        startup_message(f'Registered main plugin file \'{config_base}\'\n')
         log.plugin_loaded = True
     return _success, config_base
 
@@ -121,15 +142,20 @@ def _import_other_plugins(config_base, *, reload=False):
     for entry in os.scandir('tagger/plugins'):
         if not entry.is_file():
             continue
+        log.currently_importing = entry
         name = entry.name.rsplit('.', 1)[0]
         if name != config_base:
             module_name = f'tagger.plugins.{name}'
             if (reload and importlib.util.find_spec(module_name) is not None
                   and module_name in sys.modules):
                 del sys.modules[module_name]
-            m = importlib.import_module(module_name)
-            call_startup_hook(m)
-            startup_message(f'Registered command file \'{name}\'\n')
+            try:
+                importlib.import_module(module_name)
+            except SyntaxError:
+                if entry.name.endswith('.py'):
+                    raise
+                continue  # pass for non-python files
+            startup_message(f'Registered plugin file \'{name}\'\n')
 
 
 def _import_alt_dir_plugins(config_base):
@@ -144,6 +170,7 @@ def _import_alt_dir_plugins(config_base):
     for entry in directory:
         if not entry.is_file():
             continue
+        log.currently_importing = entry
         name = entry.name.rsplit('.', 1)[0]
         if name != config_base:
             spec = importlib.util.spec_from_file_location(
@@ -153,38 +180,34 @@ def _import_alt_dir_plugins(config_base):
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[name] = module
                 spec.loader.exec_module(module)
-                call_startup_hook(module)
-                startup_message(f'Registered command file \'{name}\'\n')
+                startup_message(f'Registered plugin file \'{name}\'\n')
 
 
 def _import_base_plugin(*, reload=False):
     """Import the default plugin file found in tagger.plugin."""
     if reload:
         del sys.modules['tagger.plugin']  # remove cache so reload occurs
+    log.importing_main_plugin = True  # set to True so defaults are loaded
     importlib.import_module('tagger.plugin')
+    log.importing_main_plugin = False
     startup_message('Registered default plugin hooks')
     startup_message('Registered default commands\n')
 
-    
+
 def reload_plugins(*, clean=False):
     """Reload all plugins if a plugin file was updated."""
-    global registry
+    global registry, plugin
+    plugin = _initialise_plugin()
     if clean:
         registry = {}
     log.new_commands = 0
-    if clean:
-        _import_base_plugin(reload=True)  # only reset hooks when cleaning
+    _import_base_plugin(reload=True)
     log.new_hooks = 0
+    log.new_loaders = 0
     if tree is not None:
         log.plugin_file = tree.root.tags.get('config', log.plugin_file)
         # attempt to update the plugin config using the data tree
     initialise_plugins(reload=True)
-
-
-def found_plugin_file(file, *, reload=True):
-    """Set the plugin file and initialise plugins."""
-    log.plugin_file = file
-    initialise_plugins(reload=reload)
 
 
 def startup_message(message):
@@ -193,9 +216,49 @@ def startup_message(message):
         print(message)
 
 
-def call_startup_hook(module):
-    """Attempt to call a plugin's startup hook."""
-    getattr(module, 'startup_hook', lambda: None)()
+def register_hook(hook, *, single=False, default=None):
+    """Register a new API hook and try to find matching functions.
+
+    hook: hook name [str]
+    single: hook only for main plugin file [bool]
+    """
+    hook = hook.strip()
+    if hook in _hook_names:
+        warning(f'hook \'{hook}\' already exists (did not overwrite)')
+        return
+    Hooks.pending_hooks[hook] = ([], None)[single]
+    startup_message(f'created hook \'{hook}\'')
+    if single and default is None:
+        raise TypeError(f'no default hook for custom hook \'{hook}\'')
+    Hooks.custom_hook_defaults[hook] = default
+
+
+def _append_floating_hooks():
+    for hook, value in Hooks.pending_hooks.items():
+        plugin._dispatch_ref[hook] = value
+        _hook_names[hook] = copy.copy(value)  # stop list duplicates
+    remainder = []
+    log.importing_main_plugin = True
+    for hook, default in Hooks.custom_hook_defaults.items():
+        if (hook in _hook_names
+              and not isinstance(plugin._dispatch_ref.get(hook), list)):
+            setattr(plugin, hook, default)
+    log.importing_main_plugin = False
+    for func in Hooks.floating_functions:
+        if func.__name__ in _hook_names:
+            if (getattr(func, '_file', None)
+                  == os.path.basename(log.plugin_file)):
+                log.importing_main_plugin = True
+            if (not log.importing_main_plugin
+                  and structure._is_single(func.__name__)):
+                continue  # skip if hook is singular
+            setattr(plugin, func.__name__, func)
+            log.new_hooks += 1
+            log.importing_main_plugin = False
+            startup_message(f'Registered hook \'{func.__name__}\'')
+        else:
+            remainder.append(func)
+    Hooks.floating_functions = remainder
 
 
 def edits(func):
@@ -249,9 +312,6 @@ class Tree:
         """Initialise a data tree from a root object."""
         self.root = root
         self.current_node = self.root
-        self.traversal_numbers = []
-        # [int]* : the indexes to get from the root to the current
-        # by root.children[t[0]].children[t[1]].children[t[2]] etc.
 
     @classmethod
     def from_parser(cls, source):
@@ -278,20 +338,31 @@ def enter_node(index):
             'index must not exceed number of children of current node'
         )
     tree.current_node = tree.current_node.children[index]
-    tree.traversal_numbers.append(index)
+
+
+def switch_node(node):
+    """Move traversal into the given node.
+
+    node: node to switch to [NodeType]
+    return value: the previous node
+    """
+    current = tree.current_node
+    if not is_node(node):
+        raise NodeError('node is not instance of NodeType')
+    tree.current_node = node
+    return current
 
 
 def return_from_node():
     """Move traversal back to the parent node.
 
     NodeError raised if current node is Root
-    return value: the index of the node in the parent's children
+    return value: None
     """
     if not hasattr(tree.current_node, 'parent'):
         # the root doesn't have a parent node
         raise NodeError('current node is the root of the tree')
     tree.current_node = tree.current_node.parent
-    return tree.traversal_numbers.pop()
 
 
 @edits
@@ -352,6 +423,7 @@ def edit_data(new, node=None):
     if not tests.not_whitespace(new):
         raise NodeError('data cannot be empty')
     node.data = new
+    node.update_id()
 
 
 @edits
@@ -373,7 +445,9 @@ def edit_tag_name(tag, new_tag, node=None, create=False):
             new_tag(new_tag, None, node)
             return
         raise NodeError(f'tag \'{tag}\' not found')
-    if not plugin.tag_name_input_test(node, tag, new_tag):
+    try:
+        plugin.tag_name_input_test(node, tag, new_tag)
+    except TypeError:
         raise NodeError(f'invalid tag name {new_tag}')
     new_tag = plugin.tag_name_hook(node, tag, new_tag)
     if not tests.not_whitespace(new_tag):
@@ -414,10 +488,14 @@ def new_tag(tag, value=None, node=None):
         node = tree.current_node
     if isinstance(value, list) and not value:
         value = None
-    if not plugin.tag_name_input_test(node, None, tag):
+    try:
+        plugin.tag_name_input_test(node, None, tag)
+    except TypeError:  # don't handle NodeError so custom message not lost
         raise NodeError(f'invalid tag name {tag}')
     tag = plugin.tag_name_hook(node, tag, tag)
-    if not plugin.tag_value_input_test(node, tag, None, value):
+    try:
+        plugin.tag_value_input_test(node, tag, None, value)
+    except TypeError:
         raise NodeError(f'invalid tag value {value}')
     value = plugin.tag_value_hook(
         node, tag, None, value
@@ -447,7 +525,10 @@ def append_tag_value(tag, new_value, node=None, create=False):
             new_tag(tag, new_value, node)
             return
         raise NodeError(f'tag \'{tag}\' not found')
-    if not plugin.tag_value_input_test(node, tag, node.tags[tag], new_value):
+
+    try:
+        plugin.tag_value_input_test(node, tag, node.tags[tag], new_value)
+    except TypeError:
         raise NodeError(f'invalid tag value {new_value}')
     new_value = plugin.tag_value_hook(
         node, tag, node.tags[tag], new_value
@@ -609,7 +690,7 @@ def _generate_commands(command_str):
     lexer = lexers.CLILexer(command_str)
     parser = parsers.CLIParser(lexer)
     commands = parser.generate_commands()
-    commands = plugin.inspect_commands(commands)
+    plugin.inspect_commands(commands)
     print(commands, end='\n\n')
     command_queue.extend(commands)
     return_values = []
@@ -749,6 +830,15 @@ def is_disabled(command):
     return command.disabled()
 
 
+def child_index_from_node(node):
+    try:
+        for i, child in enumerate(getattr(node.parent, 'children', [])):
+            if child is node:
+                return i
+    except AttributeError:
+        raise NodeError('node is the root of the tree')
+
+
 def resolve_signature(command):
     """Retrieve command signature or evaluate dynamic signature.
 
@@ -820,36 +910,42 @@ def test_input(input, message, *tests):
             r = test(input)
             if r is not True:
                 raise InputError
-    except (NodeError, InputError, ValueError, TypeError) as e:
+    except (NodeError, InputError, ValueError, TypeError):
         if isinstance(message, list):
             message = message[i]
         raise InputError(message)
 
 
-def resolve_child(indexes, node=None, offset=False):
-    """Resolve a child node using a list of indexes.
+def resolve_child(indices, node=None, offset=False):
+    """Resolve a child node using a list of indices.
 
-    indexes: a list of indexes to get to the child [list: int]
+    indices: a list of indices to get to the child [list: int]
     node: the base node to start from [default=current node]
     offset: assume index 1 is the first index, not index 0
 
     The child is resolved in a way equivalent to:
-    child = (node.children[indexes[0]].children[indexes[1]]
-             .children[indexes[2]].....children[indexes[n]])
+    child = (node.children[indices[0]].children[indices[1]]
+             .children[indices[2]].....children[indices[n]])
 
     return: the resolved node, otherwise IndexError raised
     """
     if offset:  # starting from 1
-        indexes = [i-1 for i in indexes]
+        new = []
+        for i in indices:
+            if i == 0:
+                raise IndexError(str(i))
+            if i > 0:
+                new.append(i-1)
+            else:
+                new.append(i)
+        indices = new
     if node is None:
         node = tree.current_node
-    for i in indexes:
+    for i in indices:
         try:
-            if i < 0 and offset:  # don't allow accidental negative index
-                raise IndexError()
             node = node.children[i]
         except IndexError:
-            if offset:
+            if offset and i >= 0:
                 i += 1
             raise IndexError(str(i))
     return node
@@ -928,6 +1024,13 @@ class tests:
         return not input.isspace()
 
     @staticmethod
+    def whitespace(input):
+        """Test if input contains only whitespace characters."""
+        if not isinstance(input, str):
+            return False
+        return input.isspace()
+
+    @staticmethod
     def in_range(x, y):
         """Return function to test x <= input <= y."""
         def within_range(input):
@@ -986,19 +1089,75 @@ class tests:
         # only contains letters/numbers/underscores/
     ]
 
+    @staticmethod
+    def is_keyword(input):
+        """Test if input is a valid keyword
+
+        Characters, digits and underscores only (no leading digits)
+        """
+        if not isinstance(input, str):
+            return False
+        if len(input) == 0:
+            return False
+        if input[0] not in ascii_letters+'_':
+            return False
+        letters = f'{ascii_letters}0123456789_'
+        return all(i in letters for i in input[1:])
+
+    @staticmethod
+    def is_child_reference(node):
+        """Test if node is a child reference of the current node."""
+        if not is_node(node):
+            return False
+        return getattr(node, 'parent', None) == tree.current_node
+
+    @staticmethod
+    def is_forward_reference(node):
+        """Test if node is a forward reference of the current node."""
+        if not is_node(node):
+            return False
+        return tree.current_node in node.parent_list
+
 
 class Hooks:
     """Class which must be subclassed to register custom API hooks."""
 
+    floating_functions = []
+    custom_hook_defaults = {}
+
     def __init_subclass__(cls):
         """Initialise a subclass and register its valid hooks."""
-        if log.importing_commands:
-            return
-            # don't import hooks except from plugin
-        for h in _hook_names:
-            if hasattr(cls, h):
+        for k, v in cls.__dict__.items():
+            if not callable(v):
+                continue
+            if k in _hook_names:
+                if structure._is_single(k) and not log.importing_main_plugin:
+                    continue
+                setattr(plugin, k, v)
                 log.new_hooks += 1
-                hooks[h] = getattr(cls, h)
-                # updating hooks will work with hookdispatcher as they're
-                # the same dict object
-                startup_message(f'Registered hook \'{h}\'')
+                startup_message(f'Registered hook \'{k}\'')
+                if k == 'startup_hook':
+                    v()
+            else:
+                v._file = log.currently_importing
+                Hooks.floating_functions.append(v)
+
+
+class Loader:
+    """Class which must be subclassed to register custom loaders."""
+
+    def __init_subclass__(cls):
+        if not hasattr(cls, 'ID'):
+            raise CommandError(
+                f'class \'{cls.__name__}\' is not bound to a name -'
+                ' no ID attribute'
+            )
+        loaders[' '.join(cls.ID.split())] = cls
+        log.new_loaders += 1
+        startup_message(f'Registered loader \'{cls.ID}\'')
+
+    @staticmethod
+    def found_plugin_file(file):
+        """Set the plugin file and initialise plugins."""
+        log.plugin_file = file
+        reload_plugins()

@@ -1,7 +1,14 @@
 """Objects used for data parsing and to implement CLI/signature parsing."""
 
+from string import ascii_lowercase, digits
+
 from tagger import api
-from tagger.lexers import (NUMBER, STRING, EOF, KEYWORD)
+from tagger.lexers import (
+    NUMBER, STRING, DOT, DOTDOT, TILDE, SLASH, EOF, KEYWORD
+)
+
+_id_chars = set(ascii_lowercase+digits)
+_inputs = {}
 
 
 class NodeType:
@@ -9,6 +16,37 @@ class NodeType:
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.data})'
+
+    def update_id(self):
+        name = self.data.lower()
+        new = []
+        finished = False
+        for char in name:
+            if len(new) > 5:
+                finished = True
+            if char == ' ':
+                if finished:
+                    break
+                new.append('_')
+            if char not in _id_chars:
+                continue
+            new.append(char)
+        name = ''.join(new)
+        name = '_'.join([i for i in name.split('_') if i])
+        if name[0] in digits:
+            name = '_' + name
+        try:
+            changed = True
+            while changed:
+                changed = False
+                for child in self.parent.children:
+                    print('..', getattr(child, '_id', None))
+                    if getattr(child, '_id', '') == name:
+                        name += '_'
+                        changed = True
+        except AttributeError:
+            pass
+        self.id = name
 
 
 class Root(NodeType):
@@ -20,6 +58,7 @@ class Root(NodeType):
         self.tags = tags
         self.children = []
         self.depth = 0
+        self.update_id()
 
     @property
     def parent_list(self):
@@ -44,6 +83,7 @@ class Node(NodeType):
         self.parent = parent
         self.children = []
         self._parent_list = [*self.parent.parent_list, self.parent]
+        self.update_id()
 
     def _clean_data(self):
         self.data = str(self.data)
@@ -129,7 +169,7 @@ class SignatureElement:
 
     def parse(self, parser):
         raise api.CommandError(f'parsing for {self.__class__.__name__} not yet'
-                               'implemented', error=api.CommandError)
+                               'implemented')
 
     def scan(self):
         return {}
@@ -145,9 +185,21 @@ class SignatureElement:
         else:
             parser.inputs[key] = value
 
+    def signature_syntax(self):
+        return str(self.value)
+
 
 class InputType(SignatureElement):
     """Base class for inputs in signatures."""
+
+    options = []
+
+    def __init_subclass__(cls):
+        _inputs[cls.type.upper()] = cls
+
+    def __init__(self, value, option=None):
+        self.value = value
+        self.option = option
 
     def scan(self):
         return {self.value: None}
@@ -231,11 +283,23 @@ class KeywordPhraseWrapperType(PhraseWrapperType):
 class Phrase(PhraseWrapperType):
     """Mark a grouped phrase in signatures."""
 
+    def signature_syntax(self):
+        if len(self.parts) == 1:
+            return self.parts[0].signature_syntax()
+        return '({})'.format(' '.join([
+            i.signature_syntax() for i in self.parts
+        ]))
+
 
 class OptionalPhrase(PhraseWrapperType):
     """Mark an optional phrase in signatures."""
 
     is_optional = True
+
+    def signature_syntax(self):
+        return '[{}]'.format(' '.join([
+            i.signature_syntax() for i in self.parts
+        ]))
 
 
 class Flag(KeywordPhraseWrapperType):
@@ -252,6 +316,10 @@ class Flag(KeywordPhraseWrapperType):
         self.set_input(
             parser, '_'.join(part.value for part in self.parts), True
         )
+
+    def signature_syntax(self):
+        return '[{}]'.format(' '.join([i.signature_syntax()
+                                       for i in self.parts]))
 
 
 class Capture(KeywordPhraseWrapperType):
@@ -297,6 +365,11 @@ class Or(PhraseWrapperType):
     def is_optional(self):
         return all(part.is_optional for part in self.parts)
 
+    def signature_syntax(self):
+        return '({})'.format(' | '.join([
+            i.signature_syntax() for i in self.parts
+        ]))
+
 
 class Keyword(SignatureElement):
     """Mark a keyword in signatures."""
@@ -312,6 +385,8 @@ class Keyword(SignatureElement):
 class StringInput(InputType):
     """Mark a string input in signatures."""
 
+    type = 'STRING'
+
     def parse(self, parser):
         self.set_input(parser, self.value, parser.current_token.value)
         parser.eat(STRING)
@@ -319,16 +394,142 @@ class StringInput(InputType):
     def match(self, parser, offset=0):
         return parser.lookahead(offset).type == STRING
 
+    def signature_syntax(self):
+        return '\'{}\''.format(self.value)
+
 
 class NumberInput(InputType):
     """Mark a numerical input in signatures."""
 
+    type = 'NUMBER'
+    options = ('positive', 'negative')
+
     def parse(self, parser):
-        self.set_input(parser, self.value, parser.current_token.value)
-        parser.eat(NUMBER)
+        token = parser.current_token
+        number = parser.eat(NUMBER)
+        if self.option == 'positive' and number < 0:
+            parser.raise_error('expected NUMBER (positive)', token=token)
+        elif self.option == 'negative' and number >= 0:
+            parser.raise_error('expected NUMBER (negative)', token=token)
+        self.set_input(parser, self.value, number)
 
     def match(self, parser, offset=0):
         return parser.lookahead(offset).type == NUMBER
+
+    def signature_syntax(self):
+        return 'n'
+
+
+class NodeRefInput(InputType):
+    """Mark a reference to a node as an input in signatures."""
+
+    type = 'NODEREF'
+    options = ('forward', 'child')
+
+    def match(self, parser, offset=0):
+        return (parser.lookahead(offset).type
+                in (DOT, DOTDOT, TILDE, SLASH, KEYWORD, NUMBER))
+
+    def parse(self, parser):
+        if self.option == 'forward':
+            self.parse_forward(parser)
+            return
+        elif self.option == 'child':
+            self.parse_child(parser)
+            return
+        ref = []
+        if parser.current_token.type in (DOT, DOTDOT, TILDE):
+            ref.append(parser.eat(parser.current_token.type))
+        elif parser.current_token.type == KEYWORD:
+            ref.extend(['.', parser.eat(KEYWORD)])
+        elif parser.current_token.type == NUMBER:
+            ref.extend(['.', parser.eat(NUMBER)])
+        else:
+            ref.append('.')  # assume starting slash means from current (dot)
+        while parser.current_token.type == SLASH:
+            parser.eat(SLASH)
+            if parser.current_token.type in (DOTDOT, NUMBER, KEYWORD):
+                ref.append(parser.eat(parser.current_token.type))
+            else:
+                raise api.CommandError(
+                    'expected token NUMBER, KEYWORD or DOTDOT'
+                )
+        ref = self.evaluate(ref)
+        self.set_input(parser, self.value, ref)
+
+    def parse_forward(self, parser):
+        ref = []
+        if parser.current_token.type == DOT:
+            ref.append(parser.eat(parser.current_token.type))
+        elif parser.current_token.type == KEYWORD:
+            ref.extend(['.', parser.eat(KEYWORD)])
+        elif parser.current_token.type == NUMBER:
+            ref.extend(['.', parser.eat(NUMBER)])
+        else:
+            ref.append('.')  # assume starting slash means from current (dot)
+        while parser.current_token.type == SLASH:
+            parser.eat(SLASH)
+            if parser.current_token.type in (NUMBER, KEYWORD):
+                ref.append(parser.eat(parser.current_token.type))
+            else:
+                raise api.CommandError(
+                    'expected token NUMBER or KEYWORD (forward reference)'
+                )
+        ref = self.evaluate(ref)
+        self.set_input(parser, self.value, ref)
+
+    def parse_child(self, parser):
+        ref = []
+        if parser.current_token.type == DOT:
+            ref.append(parser.eat(parser.current_token.type))
+            parser.eat(SLASH)
+        else:
+            ref.append('.')
+        if parser.current_token.type in (NUMBER, KEYWORD):
+            ref.append(parser.eat(parser.current_token.type))
+        else:
+            raise api.CommandError(
+                'expected token NUMBER or KEYWORD (child reference)'
+            )
+        ref = self.evaluate(ref)
+        self.set_input(parser, self.value, ref)
+
+    def evaluate(self, ref):
+        if api.tree is None:
+            raise api.CommandError('no data tree for node reference')
+        start = ref.pop(0)
+        if start == '~':
+            node = api.tree.root  # tilde is root node
+        elif start == '..':
+            node = api.tree.current_node  # double dot is parent node
+            if not hasattr(node, 'parent'):
+                raise api.CommandError('node is the root of the tree '
+                                       'and has no parent')
+            node = node.parent
+        else:
+            node = api.tree.current_node  # dot or slash is current node
+        for i in ref:
+            if i == '..':
+                if not hasattr(node, 'parent'):
+                    raise api.CommandError('node is the root of the '
+                                           'tree and has no parent')
+                node = node.parent
+            elif isinstance(i, int):
+                try:
+                    node = api.resolve_child([i], node, offset=True)
+                except IndexError as e:
+                    raise api.CommandError(f'node index {e} exceeds range')
+            else:  # uses node '_id'
+                for child in node.children:
+                    if i == child.id:
+                        node = child
+                        break
+                else:  # no match (unbroken loop)
+                    raise api.CommandError(f'no node with ID {i}')
+        return node
+
+    def signature_syntax(self):
+        return '<node>'
 
 
 class Optional(WrapperType):
@@ -342,6 +543,9 @@ class Optional(WrapperType):
     def parse(self, parser):
         self.pattern.parse(parser)
 
+    def signature_syntax(self):
+        return '{}?'.format(self.pattern.signature_syntax())
+
 
 class Variable(WrapperType):
     """Wrapper around inputs to mark them as variable repetition."""
@@ -351,7 +555,6 @@ class Variable(WrapperType):
     def scan(self):
         inputs = self.pattern.scan()
         inputs = {k: [] for k in inputs}
-        # print('variable', inputs)
         return inputs
 
     def match(self, parser, offset=0):
@@ -361,6 +564,9 @@ class Variable(WrapperType):
         while self.pattern.match(parser):
             self.pattern.parse(parser)
 
+    def signature_syntax(self):
+        return '{}*'.format(self.pattern.signature_syntax())
+
 
 class End(SignatureElement):
     """Mark the end of a signature."""
@@ -369,34 +575,83 @@ class End(SignatureElement):
         self.value = None
         self.type = EOF
 
+    def signature_syntax(self):
+        return ''
+
 
 class NameDispatcher:
-    """Helper class to convert attribute lookup to dictionary lookup.
+    """Helper class to convert attribute lookup to dictionary lookup."""
 
-    Can warn when value being returned is None and when a non-existent
-    key is being assigned to.
-    """
-
-    def __init__(self, reference, warn=None, error_if_none=None):
+    def __init__(self, reference, getter_hook=None, setter_hook=None):
         self._dispatch_ref = reference
-        self._warn = warn
-        self._error_none = error_if_none
+        self._getter_hook = getter_hook or (lambda ref, k, v: v)
+        self._setter_hook = setter_hook or (lambda ref, k, v: v)
 
     def __getattribute__(self, k):
-        if k in ['_dispatch_ref', '_warn', '_error_none']:
+        if k in _dispatch_names:
             return object.__getattribute__(self, k)
         try:
             r = self._dispatch_ref[k]
-            if r is None and self._error_none is not None:
-                raise TypeError('{} ({})'.format(self._error_none, k))
-            return r
         except KeyError as e:
             raise AttributeError(str(e))
+        return self._getter_hook(self._dispatch_ref, k, r)
 
     def __setattr__(self, k, v):
-        if k in ['_dispatch_ref', '_warn', '_error_none']:
+        if k in _dispatch_names:
             object.__setattr__(self, k, v)
-        elif self._warn is not None and k not in self._dispatch_ref:
-            api.warning(str(self._warn) + k)
         else:
+            v = self._setter_hook(self._dispatch_ref, k, v)
             self._dispatch_ref[k] = v
+
+
+class PluginHookDispatcher(NameDispatcher):
+    def __getattribute__(self, k):
+        if k in _dispatch_names:
+            return object.__getattribute__(self, k)
+        try:
+            r = self._dispatch_ref[k]
+            if r is None:
+                return lambda *args, **kw: None
+        except KeyError as e:
+            raise AttributeError(str(e))
+        r = self._getter_hook(self._dispatch_ref, k, r)
+        if isinstance(r, list):
+            def hook_caller(*args, **kw):
+                # return [hook(*args, **kw) for hook in r]
+                [hook(*args, **kw) for hook in r]
+            hook_caller.__name__ = k + '_hook_caller'
+            return hook_caller
+        return r
+
+    def __setattr__(self, k, v):
+        if k in _dispatch_names:
+            object.__setattr__(self, k, v)
+        else:
+            v = self._setter_hook(self._dispatch_ref, k, v)
+            if isinstance(self._dispatch_ref[k], list):
+                self._dispatch_ref[k].append(v)
+            elif api.log.importing_main_plugin:
+                self._dispatch_ref[k] = v
+
+
+_dispatch_names = ['_dispatch_ref', '_getter_hook', '_setter_hook']
+
+
+def _is_single(key):
+    return not isinstance(api.plugin._dispatch_ref.get(key, []), list)
+
+
+def warn_if_new(message):
+    def _warn_if_new(ref, key, value):
+        if key not in ref:
+            api.warning(f'{message} {key}')
+        return value
+    return _warn_if_new
+
+
+def error_if_test(test, message):
+    def _error_if_test(ref, key, value):
+        if test(value):
+            raise TypeError(f'{message} {key}')
+        return value
+    return _error_if_test

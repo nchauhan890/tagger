@@ -48,7 +48,9 @@ class Hooks(api.Hooks):
         old: the current/old name of the tag being edited [str]
         new: the new name of the tag [str]
 
-        return value: bool
+        return value: None
+        (raise TypeError to indicate invalid name, or NodeError to use
+         a custom message)
         """
         return True
 
@@ -72,7 +74,9 @@ class Hooks(api.Hooks):
         old: the current/old value of the tag [ANY]
         new: the new value of the tag [str]
 
-        return value: bool
+        return value: None
+        (raise TypeError to indicate invalid value, or NodeError to use
+         a custom message)
         """
         return True
 
@@ -83,12 +87,13 @@ class Hooks(api.Hooks):
 
         return value: a string to display [str]
         """
-        traversal = iter(current.traversal_depth)
-        string = ''
-        for i in api.tree.traversal_numbers:
-            string += str(i + 1) + '.'
-        string = string[:-1]  # remove trailing dot
+        string = '\n[~'
+        for node in api.tree.current_node.traversal_depth[1:]:
+            string += '/' + node.id
+            # display current node reference
+        string += ']'
         # --- display the current node ---
+        traversal = iter(current.traversal_depth)
         string = '\n'.join([string, next(traversal).data])  # the root's data
         for i, node in enumerate(traversal, start=1):
             string = '\n'.join([
@@ -159,35 +164,35 @@ class Hooks(api.Hooks):
 
         commands: list of commands [Command]
 
-        return value: list of commands
+        return value: None (modifications should be made in-place to list)
         """
-        return commands
+        pass
 
     def inspect_post_commands(commands):
         """Inspect/modify the commands in the post_commands queue.
 
         commands: list of commands [Command]
 
-        return value: list of commands
+        return value: None (modifications should be made in-place to list)
         """
-        return commands
+        pass
 
     def capture_return(return_values):
         """Capture the return values of commands executed in each loop.
 
         return_values: a list of tuples in the form (ID, return_value)
                        for each command that run
+
         return value: None
         """
         return None
 
+    def startup_hook():
+        """Execute code as soon as the plugin is registered.
 
-def startup_hook():
-    """Execute code as soon as the plugin is registered.
-
-    return value: None
-    """
-    pass
+        return value: None
+        """
+        pass
 
 
 class ExitCommand(api.Command):
@@ -223,11 +228,11 @@ class SaveCommand(api.Command):
     """Command to save data tree to output file."""
 
     ID = 'save'
-    signature = '[as STRING=name|<current>] <and exit>'
-    defaults = {'name': None}
+    signature = '[as STRING=name|<current>] <and exit> [using STRING=loader]'
+    defaults = {'name': None, 'loader': 'default'}
     description = 'save the data tree to a file'
 
-    def execute(self, name, current, and_exit):
+    def execute(self, name, current, and_exit, loader):
         cwd = os.path.split(api.log.data_source)[0]
         if name is None and not current:
             file = 'output.txt'
@@ -248,60 +253,21 @@ class SaveCommand(api.Command):
                     return
             file = os.path.join(cwd, name)
 
-        self.depth = 0
-        with open(file, 'w') as f:
-            self.file = f
-            self.write_data(api.tree.root.data)
-            tags = api.tree.root.tags.copy()
-            self.write_tags(tags)
-            for child in api.tree.root.children:
-                self.write_line('')
-                self.recursive_save(child)
-            print('Saved to {}'.format(file))
-            api.unsaved_changes = False
+        try:
+            loader = api.loaders[loader]()
+        except KeyError:
+            raise api.CommandError(f'no loader \'{loader}\'')
+        if not hasattr(loader, 'save'):
+            raise api.CommandError('loader has no save method')
+        loader.save(file)
+        print('Saved to {}'.format(file))
+        api.unsaved_changes = False
 
         if and_exit:
             api.manual_execute(ExitCommand(), {})
 
-    def recursive_save(self, node):
-        self.depth += 1
-        self.write_data(node.data)
-        self.write_tags(node.tags)
-        for child in node.children:
-            self.recursive_save(child)
-        self.depth -= 1
-
-    def write_tags(self, tags):
-        for k, v in tags.items():
-            if v is None:
-                v = ''
-            if isinstance(v, list):
-                for i in v:
-                    self.write_line(self.format_tag(k, i))
-                    # separate 'list' tags into multiple
-            else:
-                self.write_line(self.format_tag(k, v))
-
-    def write_data(self, data):
-        self.write_line(self.format_data(data))
-
-    def format_data(self, line):
-        line = line.replace('*', '\\*')
-        line = line.replace('`', '\\`')
-        line = line.replace('\\', '\\\\')
-        return '{}{}'.format('*' * self.depth, line)
-
-    def format_tag(self, tag, value=''):
-        tag = tag.replace('*', '\\*')
-        tag = tag.replace('`', '\\`')
-        tag = tag.replace('=','\\=')
-        tag = tag.replace('\\', '\\\\')
-        if value:
-            return '{}`{}={}'.format('*' * self.depth, tag, value)
-        return '{}`{}'.format('*' * self.depth, tag)
-
-    def write_line(self, line):
-        self.file.write('{}\n'.format(line))
+    def input_handler_loader(self, i):
+        return ' '.join(i.split())  # remove double whitespace
 
 
 class HelpCommand(api.Command):
@@ -350,40 +316,10 @@ class HelpCommand(api.Command):
             _parser = parsers.SignatureParser(_lexer, c.ID)
             _sig_parts = _parser.make_signature()
             print('- syntax:', c.ID, ' '.join([
-                self.signature_syntax(s) for s in _sig_parts
+                s.signature_syntax() for s in _sig_parts
             ]))
             if api.is_disabled(c):
                 print('- disabled in current context')
-
-    def signature_syntax(self, signature):
-        if isinstance(signature, structure.OptionalPhrase):
-            return '[{}]'.format(' '.join([
-                self.signature_syntax(x) for x in signature.parts
-            ]))
-        if isinstance(signature, structure.Phrase):
-            if len(signature.parts) == 1:
-                return self.signature_syntax(signature.parts[0])
-            return '({})'.format(' '.join([
-                self.signature_syntax(x) for x in signature.parts
-            ]))
-        if isinstance(signature, structure.End):
-            return ''
-        if isinstance(signature, structure.Optional):
-            return '{}?'.format(self.signature_syntax(signature.pattern))
-        if isinstance(signature, structure.Variable):
-            return '{}*'.format(self.signature_syntax(signature.pattern))
-        if isinstance(signature, structure.Or):
-            return '({})'.format(' | '.join([
-                self.signature_syntax(x) for x in signature.parts
-            ]))
-        if isinstance(signature, structure.Flag):
-            return '[{}]'.format(' '.join([self.signature_syntax(x)
-                                           for x in signature.parts]))
-        if isinstance(signature, structure.NumberInput):
-            return 'n'
-        if isinstance(signature, structure.NumberInput):
-            return '\'{}\''.format(signature.argument)
-        return str(signature.value)
 
 
 class ReloadCommand(api.Command):
@@ -408,21 +344,26 @@ class LoadCommand(api.Command):
     ID = 'load'
     signature = 'STRING=file [using STRING=loader]'
     description = 'find a loader command to manually load a data tree'
-    defaults = {'loader': 'default loader'}
+    defaults = {'loader': 'default'}
 
     def disabled(self):
         return api.tree is not None
 
     def execute(self, file, loader):
-        loader = api.resolve_command(loader)
+        try:
+            loader = api.loaders[loader]()
+        except KeyError:
+            raise api.CommandError(f'no loader \'{loader}\'')
+        if not hasattr(loader, 'load'):
+            raise api.CommandError('loader has no load method')
         prev = api.log.disable_all, api.log.is_startup
         api.log.disable_all = False
         api.log.is_startup = True
         api.log.data_source = os.path.abspath(file)
-        r = api._generate_commands(f'{loader.ID} \'{file}\'')
+        r = loader.load(file)
         api.log.disable_all, api.log.is_startup = prev
         # run the loading command
-        api.tree = api.Tree(r[0][1])
+        api.tree = api.Tree(r)
         # value of first (loader) command to be run
 
     def input_handler_loader(self, i):

@@ -8,49 +8,21 @@ from tagger import api
 class EnterCommand(api.Command):
 
     ID = 'enter'
-    signature = 'NUMBER=index NUMBER=extra*'
+    signature = 'NODEREF/forward=node'
     description = 'move traversal into one of the child nodes'
 
-    def execute(self, index, extra):
-        extra = extra or []
-        inputs = [index, *extra]
-        for i in inputs:
-            api.enter_node(i - 1)  # node 1 is index 0
+    def execute(self, node):
+        api.switch_node(node)
+        # all checks performed by node reference parsing
 
-    @api.priority(1)
-    def input_handler_index(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        api.test_input(num, 'current node does not have any entries', bool)
-        return int(i)
-
-    def input_handler_extra(self, inputs):
-        first = self.inputs['index']
-        for i in inputs:
-            api.test_input(
-                i, 'node index must be an integer', api.tests.integer
-            )
-            api.test_input(
-                i, 'node index must be greater than 0',
-                api.tests.greater_than(0)
-            )
-        try:
-            api.resolve_child(
-                inputs, api.tree.current_node.children[first-1], offset=True
-            )
-        except IndexError as e:
-            raise api.InputError('invalid index {}'.format(e))
-        return inputs
+    def input_handler_node(self, i):
+        api.test_input(i, api.tests.is_forward_reference())
 
 
 class ReturnCommand(api.Command):
 
     ID = 'return'
-    signature = 'NUMBER=depth?|<home>'
+    signature = 'NUMBER/positive=depth?|<home>'
     defaults = {'depth': 1}
     description = 'return to the parent node'
 
@@ -65,7 +37,7 @@ class ReturnCommand(api.Command):
     def input_handler_depth(self, i):
         api.test_input(i, 'number of depths to return must be greater than 0',
                        api.tests.greater_than(0))
-        num = len(api.tree.traversal_numbers)
+        num = api.tree.current_node.number_of_parents
         api.test_input(i, 'number of depths to return must not exceed {}'
                        .format(num), api.tests.less_equal(num))
         return i
@@ -320,6 +292,8 @@ class EditTagValueCommand(api.Command):
             node = api.tree.current_node.children[self.inputs['node']]
         if not value:  # empty
             value = None
+        if len(value) == 1:
+            value = value[0]
         api.edit_tag_value(tag, value, node=node)
 
     @api.priority(1)
@@ -423,11 +397,11 @@ class InCommand(api.Command):
 class WhatCommand(api.Command):
 
     ID = 'what'
-    signature = '<depth>|<title>|<position>|<plugin>|<commands>|<saved>'
+    signature = '<depth>|<title>|<position>|<plugin>|<commands>|<saved>|<id>'
     description = ('retrieve certain pieces of information about the '
                    'program\'s configuration or about the data tree')
 
-    def execute(self, depth, title, position, plugin, commands, saved):
+    def execute(self, depth, title, position, plugin, commands, saved, id):
         if depth:
             n = api.tree.current_node.depth
             print('The current node is {} level{} deep'.format(
@@ -471,6 +445,8 @@ class WhatCommand(api.Command):
             print('There are {}unsaved changes'.format(
                 'no ' if not api.log.unsaved_changes else ''
             ))
+        elif id:
+            print(f'The current node\'s ID is \'{api.tree.current_node.id}\'')
         else:
             raise api.InputError('no argument given')
 
@@ -541,3 +517,34 @@ class AliasCommand(api.Command):
             *api.tests.is_valid_command_name
         )
         return name
+
+
+class SearchCommand(api.Command):
+
+    ID = 'search'
+    signature = ('[for STRING=data] [tagged STRING=tag'
+                 '({and} STRING=extra)*|({or} STRING=extra)*]')
+    defaults = {'tag': None, 'data': None}
+
+    def execute(self, data, tag, extra, **kw):
+        and_ = kw['and']
+        or_ = kw['or']
+        if tag is None and data is None:
+            raise api.InputError('data or tag required')
+        if tag is not None:
+            pass
+        if data is not None:
+            pass
+
+    def input_handler_data(self, i):
+        api.test_input(i, 'data cannot be empty', api.tests.not_whitespace,
+                       bool)
+        return i
+
+    def input_handler_tag(self, i):
+        api.test_input(i, 'tag cannot be empty', api.tests.not_whitespace,
+                       bool)
+        return i
+
+    def input_handler_extra(self, i):
+        return [self.input_handler_tag(input) for input in i]

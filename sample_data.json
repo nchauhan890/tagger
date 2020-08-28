@@ -38,14 +38,14 @@
         {
           "data": "\"girls of that class\"",
           "tags": {
-            "quote": true,
+            "quote": null,
             "act": "1"
           },
           "children": [
             {
               "data": "\"that class\" - dismissive",
               "tags": {
-                "analysis": true
+                "analysis": null
               }
             }
           ]
@@ -53,14 +53,14 @@
         {
           "data": "\"I did my duty\"",
           "tags": {
-            "quote": true,
+            "quote": null,
             "act": "2"
           },
           "children": [
             {
               "data": "\"duty\" - as if obliged: no other choice",
               "tags": {
-                "analysis": true
+                "analysis": null
               }
             }
           ]
@@ -73,7 +73,7 @@
         {
           "data": "\"(impressively)\"",
           "tags": {
-            "stage direction": true
+            "stage direction": null
           }
         }
       ]

@@ -10,7 +10,7 @@ from tagger import api
 from tagger.lexers import (
     STAR, TEXT, TAG, EQUAL, NUMBER, STRING, SEMICOLON, LESS, OR, GREATER,
     EOF, LBRACKET, ARGUMENT, RBRACKET, OPTIONAL, VARIABLE, KEYWORD,
-    LPAREN, RPAREN, LBRACE, RBRACE
+    LPAREN, RPAREN, LBRACE, RBRACE, INPUT, SLASH
 )
 
 
@@ -226,6 +226,8 @@ class CLIParser(ParserBase):
 
         while not isinstance(self.current_part, structure.End):
             try:
+                if self.current_token.type == STAR:
+                    self.eat(STAR)
                 self.parse_signature_token()
             except api.CommandError as e:
                 self.raise_error(
@@ -261,6 +263,11 @@ class SignatureParser(ParserBase):
 
     def eat(self, *args, **kw):
         return ParserBase.eat(self, *args,
+            extra=f'in signature\nfor command \'{self.name}\' '
+                  f'(signature: {self.lexer.data})', **kw)
+
+    def raise_error(self, *args, **kw):
+        return ParserBase.raise_error(self, *args, **kw,
             extra=f'in signature\nfor command \'{self.name}\' '
                   f'(signature: {self.lexer.data})')
 
@@ -320,19 +327,19 @@ class SignatureParser(ParserBase):
         elif self.current_token.type == LBRACE:
             r = self.flag_or_capture(type='capture')
 
-        elif self.current_token.type == NUMBER:
-            self.eat(NUMBER)
-            r = structure.NumberInput(
-                lexers.Token(NUMBER, self.current_token.value)
-            )
-            self.eat(ARGUMENT)
-
-        elif self.current_token.type == STRING:
-            self.eat(STRING)
-            r = structure.StringInput(
-                lexers.Token(STRING, self.current_token.value)
-            )
-            self.eat(ARGUMENT)
+        elif self.current_token.type == INPUT:
+            value = self.eat(INPUT)
+            cls = structure._inputs[value]
+            option = None
+            if self.current_token.type == SLASH:
+                self.eat(SLASH)
+                kw = self.current_token
+                self.eat(KEYWORD)
+                if kw.value not in cls.options:
+                    self.raise_error(f'invalid input option \'{kw.value}\'',
+                                     token=kw)
+                option = kw.value
+            r = cls(self.eat(ARGUMENT), option=option)
 
         elif self.current_token.type == KEYWORD:
             r = structure.Keyword(self.current_token)
@@ -413,7 +420,7 @@ def _recursive_construct(parser, _depth, _parent, _top_level=False):
             parser.obj.raise_error('cannot have text')
         if diff > 1:
             parser.obj.raise_error(f'cannot have new data point {diff} '
-                'levels deeper than current level')
+                                   'levels deeper than current level')
         elif diff == 0:
             current = next(parser)
             if isinstance(current, structure.TagPattern):
@@ -421,13 +428,6 @@ def _recursive_construct(parser, _depth, _parent, _top_level=False):
                     children[-1]
                 except IndexError:
                     parser.obj.raise_error('no data point to tag')
-                tags = children[-1].tags
-                current.data = plugin.tag_name_hook(
-                    children[-1], None, current.data
-                )
-                current.value = plugin.tag_value_hook(
-                    children[-1], current.data, None, current.value
-                )
                 api.append_tag_value(
                     current.data, current.value, node=children[-1], create=True
                 )
@@ -436,7 +436,7 @@ def _recursive_construct(parser, _depth, _parent, _top_level=False):
                     current.data, _depth,
                     parent_list
                 )
-                node = structure.Node(current.data, _depth, _parent)
+                node = structure.Node(data, _depth, _parent)
                 children.append(node)
         elif diff == 1:
             try:
@@ -474,7 +474,7 @@ def construct_tree(parser):
         pattern = next(parser)
         api.append_tag_value(pattern.data, pattern.value, root, create=True)
         if pattern.data == 'config':
-            api.found_plugin_file(pattern.value)
+            api.Loader.found_plugin_file(pattern.value)
             initialised = True
     if not initialised:
         api.initialise_plugins()  # no config tag found

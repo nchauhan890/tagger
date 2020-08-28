@@ -2,6 +2,8 @@
 
 from string import ascii_letters, digits, whitespace
 
+from tagger import structure
+
 text_chars = ascii_letters + digits + '\'\\¦,.<>/?;:@#~[]{}=+-_!"£€`¬$%^&*()'
 string_chars = text_chars + whitespace
 
@@ -34,14 +36,18 @@ LBRACE = 'LBRACE'      # capture keyword
 RBRACE = 'RBRACE'
 OPTIONAL = 'OPTIONAL'
 VARIABLE = 'VARIABLE'
+INPUT = 'INPUT'
 ARGUMENT = 'ARGUMENT'  # in signatures 'NUMBER=index' where argument is =index
 LESS = 'LESS'
 GREATER = 'GREATER'
 OR = 'OR'
-LPAREN = 'LPAREN'      # non-capture, for grouping only
+DOT = 'DOT'
+DOTDOT = 'DOTDOT'
+TILDE = 'TILDE'
+SLASH = 'SLASH'
+LPAREN = 'LPAREN'    # non-capture, for grouping only
 RPAREN = 'RPAREN'
 EOF = 'EOF'
-
 
 _single_char_conversion = {  # helper lookup table to make it faster to
     '[': LBRACKET,           # convert elements that are only a single
@@ -55,6 +61,13 @@ _single_char_conversion = {  # helper lookup table to make it faster to
     '|': OR,
     '(': LPAREN,
     ')': RPAREN,
+    '/': SLASH
+}
+_single_char_conversion_CLI = {
+    '.': DOT,
+    '~': TILDE,
+    '/': SLASH,
+    '*': STAR,
 }
 
 
@@ -237,6 +250,10 @@ class CLILexer(LexerBase):
             return Token(STRING, self.collect_string())
         elif char == ';':
             return Token(SEMICOLON, self.advance())
+        elif char == '.' and self.next() == '.':
+            return Token(DOTDOT, self.advance(2))
+        elif char in _single_char_conversion_CLI:
+            return Token(_single_char_conversion_CLI[char], self.advance())
         self.raise_error(f'invalid character \'{char}\' in command')
 
 
@@ -273,8 +290,8 @@ class SignatureLexer(LexerBase):
             r += self.advance()
         if argument:
             return r
-        if r in ('NUMBER', 'STRING'):
-            token = Token(r, r)  # these literals have to be uppercase
+        if r in structure._inputs:
+            token = Token(INPUT, r)
         else:
             token = Token(KEYWORD, r.lower())  # only commands as lowercase
         return token
