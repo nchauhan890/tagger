@@ -246,7 +246,7 @@ def _append_floating_hooks():
     log.importing_main_plugin = False
     for func in Hooks.floating_functions:
         if func.__name__ in _hook_names:
-            if (getattr(func, '_file', None)
+            if log.plugin_file and (getattr(func, '_file', None)
                   == os.path.basename(log.plugin_file)):
                 log.importing_main_plugin = True
             if (not log.importing_main_plugin
@@ -381,11 +381,26 @@ def remove_node(index=None, node=None):
     if node is not None:
         if index is None:
             raise InputError('index required')
-        return node.children.pop(index)
+        r = node.children.pop(index)
+        r._deleted = True
+        del r.parent
+        r.children = []
+        return r
     if index is not None:
-        enter_node(index)
-    index = return_from_node()
-    return tree.current_node.children.pop(index)
+        if index > len(tree.current_node.children):
+            raise NodeError('invalid node index')
+        r = tree.current_node.children.pop(index)
+    else:
+        current = tree.current_node
+        return_from_node()
+        for i, n in enumerate(tree.current_node.children):
+            if n is current:
+                r = tree.current_node.children.pop(i)
+                break
+        r._deleted = True
+        del r.parent
+        r.children = []
+        return r
 
 
 @edits
@@ -453,6 +468,7 @@ def edit_tag_name(tag, new_tag, node=None, create=False):
     if not tests.not_whitespace(new_tag):
         raise NodeError('tag name cannot be empty')
     node.tags[new_tag] = value
+    node.update_id()
 
 
 @edits
@@ -474,6 +490,7 @@ def edit_tag_value(tag, new_value, node=None, create=False):
     if isinstance(new_value, list) and not new_value:
         new_value = None
     new_tag(tag, new_value, node)
+    node.update_id()
 
 
 @edits
@@ -505,6 +522,7 @@ def new_tag(tag, value=None, node=None):
     if tag in node.tags:
         warning('tag already exists')
     node.tags[tag] = value
+    node.update_id()
 
 
 @edits
@@ -543,6 +561,7 @@ def append_tag_value(tag, new_value, node=None, create=False):
         node.tags[tag] = new_value
     else:
         raise NodeError('cannot append tag value')
+    node.update_id()
 
 
 @edits
@@ -559,6 +578,7 @@ def remove_tag(tag, node=None):
         return node.tags.pop(tag)
     except KeyError:
         raise NodeError(f'tag \'{tag}\' not found')
+    node.update_id()
 
 
 def exit():
@@ -634,12 +654,14 @@ def run():
                 if input().strip().lower() == 'continue':
                     error_count = 0
                 elif log.unsaved_changes:
-                    _generate_commands('save and exit')
+                    _generate_commands('save')
+                    _generate_commands('exit without saving')
                     # run the save command to the default 'output.txt' and exit
                 else:
                     raise ProgramExit
             prompt()
         except NodeError as e:
+            # raise
             error_count += 1
             print('\nError whilst executing command:', e)
         except CommandError as e:
@@ -677,7 +699,11 @@ def prompt():
         print(plugin.prompt_string(), end='')
         r = _generate_commands(input())
         log.disable_all, log.disable_exemptions, log.unsaved_changes = prev
+        print(prev)
     else:
+        if getattr(tree.current_node, '_deleted', False):
+            switch_node(tree.root)
+            raise NodeError('current node has been deleted; switched to root')
         print(plugin.display_hook(tree.current_node))
         print(plugin.prompt_string(tree.current_node), end='')
         r = _generate_commands(input())
@@ -692,6 +718,7 @@ def _generate_commands(command_str):
     commands = parser.generate_commands()
     plugin.inspect_commands(commands)
     print(commands, end='\n\n')
+    command_queue, post_commands = [], []
     command_queue.extend(commands)
     return_values = []
     while command_queue:
@@ -974,6 +1001,45 @@ def compile_command(command_str, name, desc=''):
     return CompiledCommand
 
 
+def evaluate_node_reference(ref, *args, offset=True):
+    if tree is None:
+        raise CommandError('no data tree for node reference')
+    if args:
+        ref = [ref, *args]
+    if not ref:
+        raise ValueError('empty node reference')
+    start = ref.pop(0)
+    if start == '~':
+        node = tree.root  # tilde is root node
+    elif start == '..':
+        node = tree.current_node  # double dot is parent node
+        if not hasattr(node, 'parent'):
+            raise CommandError('node is the root of the tree '
+                               'and has no parent')
+        node = node.parent
+    else:
+        node = tree.current_node  # dot or slash is current node
+    for i in ref:
+        if i == '..':
+            if not hasattr(node, 'parent'):
+                raise CommandError('node is the root of the '
+                                   'tree and has no parent')
+            node = node.parent
+        elif isinstance(i, int):
+            try:
+                node = resolve_child([i], node, offset=offset)
+            except IndexError as e:
+                raise CommandError(f'node index {e} exceeds range')
+        else:  # uses node '_id'
+            for child in node.children:
+                if i == child.id:
+                    node = child
+                    break
+            else:  # no match (unbroken loop)
+                raise CommandError(f'no node with ID {i}')
+    return node
+
+
 def warning(message):
     """Print a warning or raise an APIWarning.
 
@@ -1127,6 +1193,7 @@ class Hooks:
 
     def __init_subclass__(cls):
         """Initialise a subclass and register its valid hooks."""
+        cls.is_main_plugin = bool(log.importing_main_plugin)
         for k, v in cls.__dict__.items():
             if not callable(v):
                 continue

@@ -1,6 +1,7 @@
 """Example commands for API."""
 
 from tagger import api
+from tagger import structure
 
 
 class Hooks(api.Hooks):
@@ -29,8 +30,7 @@ class ShowCommand(api.Command):
     ID = 'show'
 
     def execute(self):
-        # print(api.plugin.display_hook(api.tree.current_node))
-        pass
+        print(api.plugin.display_hook(api.tree.current_node))
 
 
 class ExampleCommand(api.Command):
@@ -75,6 +75,28 @@ class NodeReferenceCommand(api.Command):
 
     def execute(self, node):
         print(node)
+
+
+class CustomInput(structure.InputType):
+
+    name = 'CUSTOM'
+
+    def match(self, parser, offset=0):
+        return parser.lookahead(offset).type == 'TILDE'
+
+    def parse(self, parser):
+        parser.eat('TILDE')
+        self.set_input(parser, self.value, CustomInputDemoCommand.INPUT)
+
+
+class CustomInputDemoCommand(api.Command):
+
+    ID = 'custom input'
+    signature = 'CUSTOM=input'
+    INPUT = object()
+
+    def execute(self, input):
+        print(input)
 
 
 api.register_hook('custom_hook', single=True, default=Hooks.custom_hook)

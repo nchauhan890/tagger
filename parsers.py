@@ -247,7 +247,8 @@ class CLIParser(ParserBase):
         elif current_part.is_optional:
             self.next_part()
         else:
-            message = f'expected token {current_part.type}'
+            message = (f'expected token {current_part.type} '
+                       f'(got {self.current_token.type})')
             if isinstance(current_part, structure.Keyword):
                 message += f' ({current_part.value})'
             message += f' in {current_part.__class__.__name__}'

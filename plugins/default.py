@@ -16,7 +16,10 @@ class EnterCommand(api.Command):
         # all checks performed by node reference parsing
 
     def input_handler_node(self, i):
-        api.test_input(i, api.tests.is_forward_reference())
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
+        return i
 
 
 class ReturnCommand(api.Command):
@@ -46,29 +49,26 @@ class ReturnCommand(api.Command):
 class RemoveCommand(api.Command):
 
     ID = 'remove'
-    signature = 'NUMBER=index?'
-    defaults = {'index': None}
+    signature = 'NODEREF/forward=node?'
+    defaults = {'node': None}
     description = 'remove the current node or a child node'
 
-    def execute(self, index):
-        if index is None:
+    def execute(self, node):
+        if node is None:
             if not hasattr(api.tree.current_node, 'parent'):
                 raise api.NodeError('current node is the root of the tree '
                                     'and cannot be removed')
             api.remove_node()
             return
-        api.remove_node(index - 1)  # node 1 is index 0
+        current_node = api.tree.current_node
+        api.switch_node(node)
+        api.remove_node()
+        api.switch_node(current_node)
 
-    def input_handler_index(self, i):
-        api.test_input(i, 'index of node must be an integer',
-                       api.tests.integer)
-        i = int(i)
-        api.test_input(i, 'index of node must be greater than 0',
-                       api.tests.greater_than(0))
-        num = len(api.tree.current_node.children)
-        api.test_input(num, 'current node does not have any entries', bool)
-        api.test_input(i, 'index of node must not exceed {}'.format(num),
-                       api.tests.less_equal(num))
+    def input_handler_node(self, i):
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
         return i
 
 
@@ -80,7 +80,7 @@ class NewDataCommand(api.Command):
 
     def signature(self):
         if api.tree.current_node.children:
-            return '[at NUMBER=position] [in NUMBER=node] STRING=data'
+            return '[at NUMBER=position] [in NODEREF/forward=node] STRING=data'
         return '[at NUMBER=position] STRING=data'
 
     def execute(self, position, data, node):
@@ -99,7 +99,7 @@ class NewDataCommand(api.Command):
             node = api.tree.current_node
         else:
             # in the child node (argument 'in')
-            node = api.tree.current_node.children[self.inputs['node']]
+            node = self.inputs['node']
         num = len(node.children) + 1
         # +1 because the extra one is the last non-existent index that
         # may be created
@@ -111,13 +111,10 @@ class NewDataCommand(api.Command):
         return int(i)
 
     def input_handler_node(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        return int(i)
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
+        return i
 
     def input_handler_data(self, i):
         api.test_input(i, 'data cannot be empty', api.tests.not_whitespace,
@@ -133,14 +130,12 @@ class NewTagCommand(api.Command):
 
     def signature(self):
         if api.tree.current_node.children:
-            return '[in NUMBER=node] STRING=name STRING=value*'
+            return '[in NODEREF/forward=node] STRING=name STRING=value*'
         return 'STRING=name STRING=value*'
 
     def execute(self, name, node, value):
         # value will be a list
-        if node is not None:
-            node = api.tree.current_node.children[node-1]
-        else:
+        if node is None:
             node = api.tree.current_node
         if not value:
             value = None
@@ -154,14 +149,10 @@ class NewTagCommand(api.Command):
         return i
 
     def input_handler_node(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(num, 'current node does not have any entries', bool)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        return int(i)
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
+        return i
 
 
 class RemoveTagCommand(api.Command):
@@ -172,25 +163,19 @@ class RemoveTagCommand(api.Command):
 
     def signature(self):
         if api.tree.current_node.children:
-            return '[of NUMBER=node] STRING=tag'
+            return '[of NODEREF/forward=node] STRING=tag'
         return 'STRING=tag'
 
     def execute(self, tag, node):
         if node is None:
             node = api.tree.current_node
-        else:
-            node = api.tree.current_node.children[node]
         api.remove_tag(tag, node=node)
 
     def input_handler_node(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(num, 'current node does not have any entries', bool)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        return int(i)
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
+        return i
 
 
 class EditDataCommand(api.Command):
@@ -201,14 +186,12 @@ class EditDataCommand(api.Command):
 
     def signature(self):
         if api.tree.current_node.children:
-            return '[of NUMBER=node] STRING=data'
+            return '[of NODEREF/forward=node] STRING=data'
         return 'STRING=data'
 
     def execute(self, data, node):
         if node is None:
             node = api.tree.current_node
-        else:
-            node = api.tree.current_node.children[node-1]
         api.edit_data(data, node=node)
 
     def input_handler_data(self, i):
@@ -217,14 +200,10 @@ class EditDataCommand(api.Command):
         return i
 
     def input_handler_node(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(num, 'current node does not have any entries', bool)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'node index must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        return int(i)
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
+        return i
 
 
 class EditTagNameCommand(api.Command):
@@ -236,32 +215,28 @@ class EditTagNameCommand(api.Command):
 
     def signature(self):
         if api.tree.current_node.children:
-            return '[of NUMBER=node] STRING=tag STRING=new'
+            return '[of NODEREF/forward=node] STRING=tag STRING=new'
         return 'STRING=tag STRING=new'
 
     def execute(self, tag, new, node):
         if self.inputs['node'] is None:
             node = api.tree.current_node
         else:
-            node = api.tree.current_node.children[self.inputs['node']]
+            node = self.inputs['node']
         api.edit_tag_name(tag, new, node=node)
 
     @api.priority(1)
     def input_handler_node(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(num, 'current node does not have any entries', bool)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'node index must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        return int(i)
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
+        return i
 
     def input_handler_tag(self, i):
-        if self.inputs['node'] is None:
+        if self.inputs('node', None) is None:
             node = api.tree.current_node
         else:
-            node = api.tree.current_node.children[self.inputs['node']]
+            node = self.inputs['node']
         if i not in node.tags:
             raise api.InputError('tag \'{}\' not found'.format(i))
         return i
@@ -281,7 +256,7 @@ class EditTagValueCommand(api.Command):
 
     def signature(self):
         if api.tree.current_node.children:
-            return '[of NUMBER=node] STRING=tag STRING=value*'
+            return '[of NODEREF/forward=node] STRING=tag STRING=value*'
             # there can be no value - just a name-only tag
         return 'STRING=tag STRING=value*'
 
@@ -289,7 +264,7 @@ class EditTagValueCommand(api.Command):
         if self.inputs['node'] is None:
             node = api.tree.current_node
         else:
-            node = api.tree.current_node.children[self.inputs['node']]
+            node = self.inputs['node']
         if not value:  # empty
             value = None
         if len(value) == 1:
@@ -298,19 +273,16 @@ class EditTagValueCommand(api.Command):
 
     @api.priority(1)
     def input_handler_node(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        return int(i)
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
+        return i
 
     def input_handler_tag(self, i):
         if self.inputs['node'] is None:
             node = api.tree.current_node
         else:
-            node = api.tree.current_node.children[self.inputs['node']]
+            node = self.inputs['node']
         if i not in node.tags:
             raise api.InputError('tag \'{}\' not found'.format(i))
         return i
@@ -325,24 +297,19 @@ class AppendTagValueCommand(api.Command):
 
     def signature(self):
         if api.tree.current_node.children:
-            return '[of NUMBER=node] STRING=tag STRING=value'
+            return '[of NODEREF/forward=node] STRING=tag STRING=value'
         return 'STRING=tag STRING=value'
 
     def execute(self, tag, value, node):
         if node is None:
             node = api.tree.current_node
-        else:
-            node = api.tree.current_node.children[node]
         api.append_tag_value(tag, value, node)
 
     def input_handler_node(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        return int(i)
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'node reference must be forward reference',
+                       api.tests.is_forward_reference)
+        return i
 
     def input_handler_tag(self, i):
         api.test_input(i, 'tag cannot be empty',
@@ -353,45 +320,21 @@ class AppendTagValueCommand(api.Command):
 class InCommand(api.Command):
 
     ID = 'in'
-    signature = 'NUMBER=node NUMBER=extra*'
-    description = 'execute the subsequent commands in a child node'
+    signature = 'NODEREF=node'
+    description = 'execute the subsequent commands in another node'
 
-    def execute(self, node, extra):
-        c = EnterCommand()
-        c.inputs = api.fill_missing_args(c, {'index': node, 'extra': extra})
-        api.command_queue.insert(0, c)  # the next one to be executed
-        r = ReturnCommand()
-        r.inputs = api.fill_missing_args(r, {'depth': 1})
+    def execute(self, node):
+        current_node = api.tree.current_node
+        api.switch_node(node)
+        r = GotoCommand()
+        r.inputs = api.fill_missing_args(r, {'node': current_node})
         api.post_commands.append(r)
 
-    @api.priority(1)
     def input_handler_node(self, i):
-        num = len(api.tree.current_node.children)
-        api.test_input(
-            i, ['node index must be an integer', 'node index must be greater '
-                'than 0', 'index of node must not exceed {}'.format(num)],
-            *api.tests.is_valid_child_index(num)
-        )
-        api.test_input(num, 'current node does not have any entries', bool)
-        return int(i)
-
-    def input_handler_extra(self, inputs):
-        for i in inputs:
-            api.test_input(
-                i, 'node index must be an integer', api.tests.integer
-            )
-            api.test_input(
-                i, 'node index must be greater than 0',
-                api.tests.greater_than(0)
-            )
-        first = self.inputs['node']
-        try:
-            api.resolve_child(
-                inputs, api.tree.current_node.children[first-1], offset=True
-            )
-        except IndexError as e:
-            raise api.InputError('invalid index {}'.format(e))
-        return inputs
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'input must be node reference',
+                       api.is_node)
+        return i
 
 
 class WhatCommand(api.Command):
@@ -548,3 +491,19 @@ class SearchCommand(api.Command):
 
     def input_handler_extra(self, i):
         return [self.input_handler_tag(input) for input in i]
+
+
+class GotoCommand(api.Command):
+
+    ID = 'goto'
+    signature = 'NODEREF=node'
+    description = 'switch to any node in the data tree'
+
+    def execute(self, node):
+        api.switch_node(node)
+
+    def input_handler_node(self, i):
+        i = api.evaluate_node_reference(i)
+        api.test_input(i, 'input must be node reference',
+                       api.is_node)
+        return i

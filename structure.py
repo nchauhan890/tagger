@@ -4,10 +4,10 @@ from string import ascii_lowercase, digits
 
 from tagger import api
 from tagger.lexers import (
-    NUMBER, STRING, DOT, DOTDOT, TILDE, SLASH, EOF, KEYWORD
+    NUMBER, STRING, DOT, DOTDOT, TILDE, SLASH, EOF, KEYWORD, INPUT
 )
 
-_id_chars = set(ascii_lowercase+digits)
+_id_chars = set(ascii_lowercase+digits+'_')
 _inputs = {}
 
 
@@ -18,20 +18,24 @@ class NodeType:
         return f'{self.__class__.__name__}({self.data})'
 
     def update_id(self):
-        name = self.data.lower()
-        new = []
-        finished = False
-        for char in name:
-            if len(new) > 5:
-                finished = True
-            if char == ' ':
-                if finished:
-                    break
-                new.append('_')
-            if char not in _id_chars:
-                continue
-            new.append(char)
-        name = ''.join(new)
+        if '_id' in self.tags:
+            name = list(str(self.tags['_id']))
+            name = ''.join([i for i in name if i in _id_chars])
+        else:
+            name = self.data.lower()
+            new = []
+            finished = False
+            for char in name:
+                if len(new) > 5:
+                    finished = True
+                if char == ' ':
+                    if finished:
+                        break
+                    new.append('_')
+                if char not in _id_chars:
+                    continue
+                new.append(char)
+            name = ''.join(new)
         name = '_'.join([i for i in name.split('_') if i])
         if name[0] in digits:
             name = '_' + name
@@ -40,7 +44,6 @@ class NodeType:
             while changed:
                 changed = False
                 for child in self.parent.children:
-                    print('..', getattr(child, '_id', None))
                     if getattr(child, '_id', '') == name:
                         name += '_'
                         changed = True
@@ -179,7 +182,7 @@ class SignatureElement:
             current = parser.inputs[key]
         except KeyError:
             raise api.CommandError('signature object tried to assign to '
-                                   f'unscanned input {key}')
+                                   f'unscanned input \'{key}\'')
         if isinstance(current, list):
             current.append(value)
         else:
@@ -195,9 +198,10 @@ class InputType(SignatureElement):
     options = []
 
     def __init_subclass__(cls):
-        _inputs[cls.type.upper()] = cls
+        _inputs[cls.name.upper()] = cls
 
     def __init__(self, value, option=None):
+        self.type = INPUT
         self.value = value
         self.option = option
 
@@ -385,7 +389,7 @@ class Keyword(SignatureElement):
 class StringInput(InputType):
     """Mark a string input in signatures."""
 
-    type = 'STRING'
+    name = 'STRING'
 
     def parse(self, parser):
         self.set_input(parser, self.value, parser.current_token.value)
@@ -401,7 +405,7 @@ class StringInput(InputType):
 class NumberInput(InputType):
     """Mark a numerical input in signatures."""
 
-    type = 'NUMBER'
+    name = 'NUMBER'
     options = ('positive', 'negative')
 
     def parse(self, parser):
@@ -423,7 +427,7 @@ class NumberInput(InputType):
 class NodeRefInput(InputType):
     """Mark a reference to a node as an input in signatures."""
 
-    type = 'NODEREF'
+    name = 'NODEREF'
     options = ('forward', 'child')
 
     def match(self, parser, offset=0):
@@ -454,7 +458,6 @@ class NodeRefInput(InputType):
                 raise api.CommandError(
                     'expected token NUMBER, KEYWORD or DOTDOT'
                 )
-        ref = self.evaluate(ref)
         self.set_input(parser, self.value, ref)
 
     def parse_forward(self, parser):
@@ -475,7 +478,6 @@ class NodeRefInput(InputType):
                 raise api.CommandError(
                     'expected token NUMBER or KEYWORD (forward reference)'
                 )
-        ref = self.evaluate(ref)
         self.set_input(parser, self.value, ref)
 
     def parse_child(self, parser):
@@ -491,42 +493,7 @@ class NodeRefInput(InputType):
             raise api.CommandError(
                 'expected token NUMBER or KEYWORD (child reference)'
             )
-        ref = self.evaluate(ref)
         self.set_input(parser, self.value, ref)
-
-    def evaluate(self, ref):
-        if api.tree is None:
-            raise api.CommandError('no data tree for node reference')
-        start = ref.pop(0)
-        if start == '~':
-            node = api.tree.root  # tilde is root node
-        elif start == '..':
-            node = api.tree.current_node  # double dot is parent node
-            if not hasattr(node, 'parent'):
-                raise api.CommandError('node is the root of the tree '
-                                       'and has no parent')
-            node = node.parent
-        else:
-            node = api.tree.current_node  # dot or slash is current node
-        for i in ref:
-            if i == '..':
-                if not hasattr(node, 'parent'):
-                    raise api.CommandError('node is the root of the '
-                                           'tree and has no parent')
-                node = node.parent
-            elif isinstance(i, int):
-                try:
-                    node = api.resolve_child([i], node, offset=True)
-                except IndexError as e:
-                    raise api.CommandError(f'node index {e} exceeds range')
-            else:  # uses node '_id'
-                for child in node.children:
-                    if i == child.id:
-                        node = child
-                        break
-                else:  # no match (unbroken loop)
-                    raise api.CommandError(f'no node with ID {i}')
-        return node
 
     def signature_syntax(self):
         return '<node>'

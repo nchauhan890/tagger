@@ -3,7 +3,6 @@
 import os
 
 from tagger import api
-from tagger import structure
 from tagger import lexers
 from tagger import parsers
 
@@ -261,7 +260,7 @@ class SaveCommand(api.Command):
             raise api.CommandError('loader has no save method')
         loader.save(file)
         print('Saved to {}'.format(file))
-        api.unsaved_changes = False
+        api.log.unsaved_changes = False
 
         if and_exit:
             api.manual_execute(ExitCommand(), {})
@@ -360,6 +359,10 @@ class LoadCommand(api.Command):
         api.log.disable_all = False
         api.log.is_startup = True
         api.log.data_source = os.path.abspath(file)
+        api.log.new_commands = 0
+        api._import_base_plugin(reload=True)
+        api.log.new_hooks = 0
+        api.log.new_loaders = 0
         r = loader.load(file)
         api.log.disable_all, api.log.is_startup = prev
         # run the loading command

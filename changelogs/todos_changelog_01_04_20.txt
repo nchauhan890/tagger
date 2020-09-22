@@ -493,7 +493,7 @@ what's changed between releases
             - in offset mode, positive indices start from 1 and negative
               indices start from -1
 - 23/08/20: added Node.id attribute which is set/updated with
-            NodeType.update_id() - it is set as follows:
+        **  NodeType.update_id() - it is set as follows:
             - node data used as base
             - only digits and characters kept from node's data
             - all characters made lowercase
@@ -508,6 +508,7 @@ what's changed between releases
             - .update_id() should be called whenever a node's data is changed
               or created or moved (api.edit_data calls it) and it is called
               in Node/Root.__init__
+              [ADDED TO ON 13/09/20]
 - 23/08/20: added 'what id' extension to 'what' command to show current node ID
 - 24/08/20: the syntax for node references is as follows:
             - references start with either a dot, double dot, tilde, slash,
@@ -556,9 +557,10 @@ what's changed between releases
               to lowercase as before unless they are in structure._inputs
 - 26/08/20: all input elements in command signatures must be a subclass of
             structure.InputType
-            - they should have a .type attribute which is the value of the
+        **  - they should have a .type attribute which is the value of the
               INPUT token produced by the signature lexer that matches the
               class
+            [CHANGED ON 04/09/20]
 - 26/08/20: added 'input options' to command signatures:
             - input tokens can have a slash followed by a single keyword
               indicating an option - e.g. 'NODEREF/child=node'
@@ -595,8 +597,42 @@ what's changed between releases
 - 27/08/20: added api.child_index_from_node(node) which will return what index
             in the parent's child list the node is
             - raises NodeError if the node is the root node
+- 02/09/20: changed some commands to use node reference input:
+            - 'enter' changed to 'enter NODEREF/forward=node'
+            - 'remove' changed to 'remove NODEREF/forward=node?'
+            - 'new data' changed
+            - 'new tag' changed
+            - 'remove tag' changed
+            - 'edit data' changed
+            - 'edit tag name' changed
+            - 'edit tag value' changed
+            - 'append tag value' changed
+            - 'in' changed
+- 02/09/20: added default.GotoCommand which behaves like EnterCommand, but
+            allows switching to any node (ID 'goto')
+- 04/09/20: subclasses of structure.InputType should have a .name attribute
+            which is the name of the input that should be recognised in command
+            signatures
+            - .type attribute will be set to INPUT as this is its correct token
+- 07/09/20: NodeReferences are passed in list form e.g. ['~,', 1, 'node_id']
+            - api.evaluate_node_reference(list, *args, offset=True) can be used
+              to evaluate it and input handlers should call this function
+              - if offset is False, assume numerical references start at 0,
+                not 1
+              - argument 'list' can be supplied as individual arguments too
+- 13/09/20: api.Hooks subclasses will have the attribute 'is_main_plugin' set
+            on them upon creation - it will be True if the subclass is in the
+            main plugin file (in the 'config' tag of the data tree)
+            - this can be used to only perform certain actions in plugin hooks
+              when the plugin is the main plugin file (see sample.py)
+- 13/09/20: if a node has an '_id' tag, its value will be used as the base of
+            node.id
+            - an underscore will be prepended still if it starts with a digit
+            - an underscore will be appended still if the ID is already taken
+              by a sibling node (node in node.parent.children)
 
-
+BUGS:
+fix error when no default is given in edit tag value when there are no children
 
 **clean up files before committing**
 
